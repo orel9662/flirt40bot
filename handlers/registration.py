@@ -1,10 +1,12 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from database.db import add_user, get_user
+from database.db import add_user, get_user, REGIONS
 import os
 
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
-GENDER, NAME, AGE, CITY, BIO, PHOTO, ID_CARD = range(7)
+
+GENDER, NAME, AGE, REGION, CITY, BIO, PHOTOS, ID_CARD = range(8)
+MAX_PHOTOS = 5
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -15,24 +17,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if existing["is_blocked"]:
             await update.message.reply_text(
                 "⛔ *חשבונך חסום | Your account is blocked*\n\n"
-                "🇮🇱 אם אתה חושב שזו טעות, שלח הודעה עם הסברך.\n"
-                "🇬🇧 If you think this is a mistake, send a message explaining your case.",
+                "אם אתה חושב שזו טעות, שלח הודעה עם הסברך.\n"
+                "_If you think this is a mistake, send a message explaining._",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
+
+        if existing["status"] == "deleted":
+            await update.message.reply_text(
+                "❌ *חשבונך נמחק | Your account was deleted*\n\n"
+                "פנה להנהלה אם יש שאלות.\n_Contact admin if you have questions._",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+
         if existing["status"] == "pending":
             await update.message.reply_text(
-                "⏳ *פרופילך ממתין לאישור | Your profile is pending approval*\n\n"
+                "⏳ *פרופילך ממתין לאישור | Pending approval*\n\n"
                 "נחזור אליך בקרוב! | _We'll get back to you soon!_",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
+
         if existing["status"] == "approved":
             await update.message.reply_text(
-                f"💋 *ברוך הבא חזרה ל-Flirt40, {existing['name']}!*\n"
-                "_Welcome back to Flirt40!_\n\n"
-                "השתמש ב /browse כדי לראות פרופילים.\n"
-                "_Use /browse to see profiles._",
+                f"💋 *ברוך הבא חזרה, {existing['name']}!*\n"
+                "_Welcome back!_\n\n"
+                "/browse - גלוש בפרופילים\n"
+                "/status - הסטטוס שלך\n"
+                "/premium - שדרג לפרמיום",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
@@ -44,11 +57,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💋 *ברוכים הבאים ל-Flirt40!*\n"
         "_Welcome to Flirt40!_\n\n"
-        "🇮🇱 פלטפורמת היכרויות לקשר קליל ולא מחייב בין נשים מעל גיל 40 לגברים מתחת לגיל 40.\n"
-        "🇬🇧 A casual, no-strings-attached dating platform for women over 40 and men under 40.\n\n"
-        "⚠️ *אימות זהות חובה | ID Verification Required*\n"
-        "🔒 צילום התז נגיש אך ורק להנהלה לצרכי אימות בלבד, ונמחק לאחר השלמת תהליך האימות.\n"
-        "🔒 Your ID is accessible only to the admin for verification purposes, and deleted after the verification process is complete.\n\n"
+        "🇮🇱 פלטפורמת היכרויות לקשר קליל ולא מחייב בין נשים מעל גיל 40 לגברים מתחת לגיל 40.\n\n"
+        "🇬🇧 A casual, no-strings-attached dating platform connecting women over 40 with men under 40.\n\n"
         "בחר/י מגדר | *Select your gender:*",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -61,34 +71,26 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     gender = query.data.replace("gender_", "")
     context.user_data["gender"] = gender
-    if gender == "male":
-        await query.edit_message_text(
-            "👨 נרשמת כגבר | _Registered as a man_\n\n"
-            "🇮🇱 הבוט מיועד לגברים מתחת לגיל 40 המחפשים קשר קליל ולא מחייב.\n"
-            "🇬🇧 This bot is for men under 40 looking for casual connections.\n\n"
-            "מה שמך המלא? | *What is your full name?*",
-            parse_mode="Markdown"
-        )
-    else:
-        await query.edit_message_text(
-            "👩 נרשמת כאישה | _Registered as a woman_\n\n"
-            "🇮🇱 הבוט מיועד לנשים מעל גיל 40 המחפשות קשר קליל ולא מחייב.\n"
-            "🇬🇧 This bot is for women over 40 looking for casual connections.\n\n"
-            "מה שמך המלא? | *What is your full name?*",
-            parse_mode="Markdown"
-        )
+    context.user_data["photos"] = []
+
+    await query.edit_message_text(
+        "מה שמך? | *What's your name?*\n"
+        "_(שם פרטי בלבד | First name only)_",
+        parse_mode="Markdown"
+    )
     return NAME
 
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
-    if len(name) < 2 or len(name) > 50:
-        await update.message.reply_text("❌ שם לא תקין | _Invalid name:_")
+    if len(name) < 2 or len(name) > 30:
+        await update.message.reply_text("❌ שם לא תקין | _Invalid name (2-30 chars):_")
         return NAME
     context.user_data["name"] = name
     await update.message.reply_text(
-        f"✅ שלום {name}! | _Hello {name}!_\n\n"
-        "מה גילך? | *How old are you?* _(מספר בלבד | numbers only)_",
+        f"שלום {name}! 👋\n\n"
+        "מה גילך? | *How old are you?*\n"
+        "_(מספר בלבד | numbers only)_",
         parse_mode="Markdown"
     )
     return AGE
@@ -104,25 +106,45 @@ async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gender = context.user_data.get("gender")
     if gender == "female" and age < 40:
         await update.message.reply_text(
-            "❌ *הבוט מיועד לנשים מעל גיל 40 בלבד.*\n"
-            "_This bot is for women over 40 only._",
+            "❌ *הבוט מיועד לנשים מעל גיל 40 בלבד.*\n_This bot is for women over 40 only._",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
     if gender == "male" and age >= 40:
         await update.message.reply_text(
-            "❌ *הבוט מיועד לגברים מתחת לגיל 40 בלבד.*\n"
-            "_This bot is for men under 40 only._",
+            "❌ *הבוט מיועד לגברים מתחת לגיל 40 בלבד.*\n_This bot is for men under 40 only._",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
     if age < 18:
-        await update.message.reply_text("❌ גיל מינימלי הוא 18 | _Minimum age is 18_")
+        await update.message.reply_text("❌ גיל מינימלי 18 | _Minimum age 18_")
         return ConversationHandler.END
 
     context.user_data["age"] = age
+
+    keyboard = [
+        [InlineKeyboardButton("🌿 צפון / North", callback_data="region_north")],
+        [InlineKeyboardButton("🏙 מרכז / Center", callback_data="region_center")],
+        [InlineKeyboardButton("🌵 דרום / South", callback_data="region_south")]
+    ]
     await update.message.reply_text(
-        "📍 באיזו עיר? | *What city?*",
+        "📍 *באיזה אזור אתה/את?*\n_Which region are you in?_",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return REGION
+
+
+async def get_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    region = query.data.replace("region_", "")
+    context.user_data["region"] = region
+    region_name = REGIONS.get(region, region)
+
+    await query.edit_message_text(
+        f"✅ {region_name}\n\n"
+        "באיזו עיר? | *Which city?*",
         parse_mode="Markdown"
     )
     return CITY
@@ -132,8 +154,8 @@ async def get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["city"] = update.message.text.strip()
     await update.message.reply_text(
         "📝 *ספר/י על עצמך | Tell us about yourself*\n\n"
-        "🇮🇱 מה אתה/את מחפש/ת, תחביבים וכו' - עד 300 תווים\n"
-        "🇬🇧 What you're looking for, hobbies, etc. - max 300 chars",
+        "🇮🇱 מה אתה/את מחפש/ת, תחביבים, על עצמך - עד 300 תווים\n"
+        "🇬🇧 What you're looking for, hobbies, about yourself - max 300 chars",
         parse_mode="Markdown"
     )
     return BIO
@@ -145,26 +167,84 @@ async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ עד 300 תווים | _Max 300 chars:_")
         return BIO
     context.user_data["bio"] = bio
+    context.user_data["photos"] = []
+
     await update.message.reply_text(
-        "📸 *שלח/י תמונת פרופיל | Send a profile photo*\n"
-        "_תמונה ברורה של הפנים | A clear face photo_",
+        "📸 *שלח/י תמונות פרופיל | Send profile photos*\n\n"
+        "🇮🇱 שלח/י עד 5 תמונות, אחת אחת. כשסיימת שלח/י /done\n"
+        "🇬🇧 Send up to 5 photos, one by one. When done, send /done\n\n"
+        "_(תמונה ראשונה תהיה תמונת הפרופיל הראשית | First photo will be your main profile photo)_",
         parse_mode="Markdown"
     )
-    return PHOTO
+    return PHOTOS
 
 
-async def get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["photo_file_id"] = update.message.photo[-1].file_id
+async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photos = context.user_data.get("photos", [])
+
+    # /done command
+    if update.message.text and update.message.text.strip() == "/done":
+        if len(photos) == 0:
+            await update.message.reply_text(
+                "❌ שלח/י לפחות תמונה אחת | _Please send at least one photo_"
+            )
+            return PHOTOS
+        await _ask_for_id(update, context)
+        return ID_CARD
+
+    if not update.message.photo:
+        await update.message.reply_text(
+            "❌ שלח/י תמונה או /done לסיום | _Send a photo or /done to finish_"
+        )
+        return PHOTOS
+
+    if len(photos) >= MAX_PHOTOS:
+        await update.message.reply_text(
+            f"✅ כבר יש לך {MAX_PHOTOS} תמונות - זה המקסימום!\n"
+            f"שלח/י /done להמשך | _Send /done to continue_"
+        )
+        return PHOTOS
+
+    file_id = update.message.photo[-1].file_id
+    photos.append(file_id)
+    context.user_data["photos"] = photos
+
+    remaining = MAX_PHOTOS - len(photos)
+    if remaining > 0:
+        await update.message.reply_text(
+            f"✅ תמונה {len(photos)} התקבלה!\n"
+            f"אפשר לשלוח עוד {remaining} תמונות, או /done לסיום\n"
+            f"_Photo {len(photos)} received! Send {remaining} more or /done to finish_"
+        )
+    else:
+        await update.message.reply_text(
+            f"✅ {MAX_PHOTOS} תמונות התקבלו - מקסימום!\n"
+            "שלח/י /done להמשך | _Send /done to continue_"
+        )
+    return PHOTOS
+
+
+async def _ask_for_id(update, context):
     await update.message.reply_text(
         "🪪 *שלח/י צילום תעודת זהות | Send your ID card*\n\n"
-        "🔒 התז נגיש אך ורק להנהלה לצרכי אימות בלבד, ונמחק לאחר השלמת תהליך האימות.\n"
-        "🔒 Your ID is accessible only to the admin for verification, and deleted after the verification process is complete.",
+        "🇮🇱 *למה אנחנו צריכים את זה?*\n"
+        "לאימות גיל ושם בלבד - כדי להבטיח שהקהילה שלנו אמינה ובטוחה.\n"
+        "🔒 התז נגיש אך ורק להנהלה ונמחק לאחר השלמת תהליך האימות.\n\n"
+        "🇬🇧 *Why do we need this?*\n"
+        "For age and name verification only - to ensure our community is safe and genuine.\n"
+        "🔒 Your ID is only accessible to the admin and deleted after verification is complete.",
         parse_mode="Markdown"
     )
-    return ID_CARD
 
 
 async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Handle /done in ID_CARD state (in case user types it)
+    if update.message.text:
+        await update.message.reply_text(
+            "❌ שלח/י צילום תעודת זהות | _Please send a photo of your ID_"
+        )
+        return ID_CARD
+
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
     elif update.message.document:
@@ -173,39 +253,42 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ שלח/י תמונה | _Send a photo_")
         return ID_CARD
 
-    context.user_data["id_card_file_id"] = file_id
     data = context.user_data
-
     bonus = add_user(
         user_id=update.effective_user.id,
         username=update.effective_user.username or "",
         gender=data["gender"],
         name=data["name"],
         age=data["age"],
+        region=data["region"],
         city=data["city"],
         bio=data["bio"],
-        photo_file_id=data["photo_file_id"],
-        id_card_file_id=data["id_card_file_id"]
+        id_card_file_id=file_id,
+        photos=data.get("photos", [])
     )
 
     bonus_msg = ""
     if bonus > 0:
         bonus_msg = (
-            f"\n\n🎁 *מזל טוב! אתה בין {bonus} הנרשמים הראשונים!*\n"
-            f"קיבלת {bonus} לייקים מתנה לשימוש לאחר האישור! 🎉\n"
-            f"_Congrats! You're among the first {bonus} users! You received {bonus} bonus likes!_"
+            f"\n\n🎁 *אתה בין {FIRST_USERS_COUNT} הנרשמים הראשונים!*\n"
+            f"קיבלת {bonus} לייקים מתנה! 🎉\n"
+            f"_You're among the first {FIRST_USERS_COUNT} users! {bonus} bonus likes await you!_"
         )
 
     await update.message.reply_text(
         "✅ *ההרשמה התקבלה! | Registration received!*\n\n"
         "🇮🇱 פרופילך ממתין לאישור ההנהלה. נחזור אליך תוך 24 שעות. 🙏\n"
-        "🇬🇧 Your profile is pending admin approval. We'll get back to you within 24 hours. 🙏"
+        "🇬🇧 Your profile is pending admin approval. We'll respond within 24 hours. 🙏"
         + bonus_msg,
         parse_mode="Markdown"
     )
 
     if ADMIN_ID:
+        from database.db import get_user_photos, REGIONS
+        photos_list = data.get("photos", [])
         gender_text = "👩 אישה" if data["gender"] == "female" else "👨 גבר"
+        region_name = REGIONS.get(data["region"], data["region"])
+
         keyboard = [[
             InlineKeyboardButton("✅ אשר", callback_data=f"approve_{update.effective_user.id}"),
             InlineKeyboardButton("❌ דחה", callback_data=f"reject_{update.effective_user.id}")
@@ -213,18 +296,31 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🚫 חסום", callback_data=f"block_{update.effective_user.id}"),
             InlineKeyboardButton("🪪 צפה בתז", callback_data=f"view_id_{update.effective_user.id}")
         ]]
-        await context.bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=data["photo_file_id"],
-            caption=(
-                f"📋 *בקשת הרשמה - Flirt40*\n\n"
-                f"👤 {data['name']}, גיל {data['age']}\n"
-                f"📍 {data['city']} | {gender_text}\n"
-                f"📝 {data['bio']}\n"
-                f"🎁 לייקים בונוס: {bonus}\n\n"
-                f"🆔 `{update.effective_user.id}` | @{update.effective_user.username or 'אין'}"
-            ),
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+
+        caption = (
+            f"📋 *בקשת הרשמה - Flirt40*\n\n"
+            f"👤 {data['name']}, גיל {data['age']}\n"
+            f"📍 {region_name} - {data['city']} | {gender_text}\n"
+            f"📝 {data['bio']}\n"
+            f"🎁 בונוס לייקים: {bonus}\n"
+            f"🆔 `{update.effective_user.id}` | @{update.effective_user.username or 'אין'}"
         )
+
+        if photos_list:
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=photos_list[0],
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            # Send extra photos if any
+            for extra_photo in photos_list[1:]:
+                await context.bot.send_photo(chat_id=ADMIN_ID, photo=extra_photo)
+        else:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID, text=caption, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
     return ConversationHandler.END
