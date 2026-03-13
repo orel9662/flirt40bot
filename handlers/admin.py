@@ -75,17 +75,19 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         bonus_msg = f"\n🎁 יש לך {user['bonus_likes']} לייקים בונוס!" if user and user["bonus_likes"] > 0 else ""
 
+        bonus_msg2 = f"\n\n🎁 יש לך {user['bonus_likes']} לייקים בונוס מוכנים לשימוש!" if user and user["bonus_likes"] > 0 else ""
         await context.bot.send_message(
             chat_id=user_id,
             text=(
                 "✅ *פרופילך אושר! Your profile is approved!*\n\n"
-                "💋 ברוך הבא ל-Flirt40!\n\n"
+                "💋 ברוך הבא ל-Flirt40! Welcome to Flirt40!\n\n"
                 f"{premium_features}"
-                "📌 פקודות זמינות:\n"
-                "/browse - גלוש בפרופילים\n"
-                "/premium - שדרג לפרמיום\n"
-                "/status - בדוק את הסטטוס שלך"
-                + bonus_msg
+                "📌 *פקודות זמינות | Available commands:*\n"
+                "/browse - גלוש בפרופילים | Browse profiles\n"
+                "/premium - שדרג לפרמיום | Upgrade to Premium\n"
+                "/status - הסטטוס שלך | Your status\n"
+                "/filter - סנן לפי אזור (פרמיום) | Filter by region"
+                + bonus_msg2
             ),
             parse_mode="Markdown"
         )
