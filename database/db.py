@@ -14,6 +14,24 @@ REGIONS = {
     "south": "דרום 🌵"
 }
 
+RULES_TEXT = (
+    "📋 *כללי Flirt40*\n\n"
+    "🇮🇱\n"
+    "✅ שמור/י על שיח מכבד ונעים\n"
+    "✅ תמונות אמיתיות ועדכניות בלבד\n"
+    "❌ אסור להטריד, לאיים או לפגוע\n"
+    "❌ אסור לשלוח תוכן פוגעני או בלתי הולם\n"
+    "❌ אסור להתחזות לאדם אחר\n"
+    "⚠️ הפרת הכללים תגרור השעיה או חסימה.\n\n"
+    "🇬🇧\n"
+    "✅ Be respectful and kind\n"
+    "✅ Real and recent photos only\n"
+    "❌ No harassment, threats or harm\n"
+    "❌ No offensive or inappropriate content\n"
+    "❌ No impersonation\n"
+    "⚠️ Violations may result in suspension or ban."
+)
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -36,6 +54,7 @@ def init_db():
             bio TEXT,
             status TEXT DEFAULT 'pending',
             is_blocked INTEGER DEFAULT 0,
+            is_suspended INTEGER DEFAULT 0,
             is_premium INTEGER DEFAULT 0,
             premium_until TIMESTAMP,
             bonus_likes INTEGER DEFAULT 0,
@@ -47,11 +66,44 @@ def init_db():
         )
     """)
     c.execute("""
+        CREATE TABLE IF NOT EXISTS deleted_users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            gender TEXT,
+            name TEXT,
+            age INTEGER,
+            region TEXT,
+            city TEXT,
+            had_reports INTEGER DEFAULT 0,
+            had_blocks INTEGER DEFAULT 0,
+            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS user_photos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             file_id TEXT,
-            position INTEGER DEFAULT 0,
+            position INTEGER DEFAULT 0
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reporter_id INTEGER,
+            reported_id INTEGER,
+            reason TEXT,
+            evidence_file_id TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bug_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            description TEXT,
+            status TEXT DEFAULT 'open',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -117,6 +169,8 @@ def init_db():
 
 def add_user(user_id, username, gender, name, age, region, city, bio, id_card_file_id, photos):
     conn = get_conn()
+    # Check if returning user
+    deleted = conn.execute("SELECT * FROM deleted_users WHERE user_id = ?", (user_id,)).fetchone()
     count = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
     bonus = FIRST_USERS_BONUS if count < FIRST_USERS_COUNT else 0
     conn.execute("""
@@ -124,14 +178,13 @@ def add_user(user_id, username, gender, name, age, region, city, bio, id_card_fi
         (user_id, username, gender, name, age, region, city, bio, id_card_file_id, status, bonus_likes, filter_region)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     """, (user_id, username, gender, name, age, region, city, bio, id_card_file_id, bonus, region))
-    # Delete old photos and add new ones
     conn.execute("DELETE FROM user_photos WHERE user_id = ?", (user_id,))
     for i, file_id in enumerate(photos):
         conn.execute("INSERT INTO user_photos (user_id, file_id, position) VALUES (?, ?, ?)",
                      (user_id, file_id, i))
     conn.commit()
     conn.close()
-    return bonus
+    return bonus, deleted
 
 
 def get_user(user_id):
@@ -141,6 +194,13 @@ def get_user(user_id):
     return user
 
 
+def get_deleted_user_history(user_id):
+    conn = get_conn()
+    result = conn.execute("SELECT * FROM deleted_users WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    return result
+
+
 def get_user_photos(user_id):
     conn = get_conn()
     photos = conn.execute(
@@ -148,6 +208,37 @@ def get_user_photos(user_id):
     ).fetchall()
     conn.close()
     return [p["file_id"] for p in photos]
+
+
+def delete_user_self(user_id):
+    """User deletes themselves - save skeleton record, remove everything else."""
+    conn = get_conn()
+    user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        return
+
+    had_reports = conn.execute(
+        "SELECT COUNT(*) as c FROM reports WHERE reported_id = ?", (user_id,)
+    ).fetchone()["c"]
+    had_blocks = 1 if user["is_blocked"] else 0
+
+    # Save skeleton
+    conn.execute("""
+        INSERT OR REPLACE INTO deleted_users
+        (user_id, username, gender, name, age, region, city, had_reports, had_blocks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, user["username"], user["gender"], user["name"],
+          user["age"], user["region"], user["city"], had_reports, had_blocks))
+
+    # Delete everything else
+    conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM user_photos WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM likes WHERE from_user_id = ? OR to_user_id = ?", (user_id, user_id))
+    conn.execute("DELETE FROM seen WHERE viewer_id = ? OR viewed_id = ?", (user_id, user_id))
+    conn.execute("DELETE FROM active_chats WHERE user_id = ? OR partner_id = ?", (user_id, user_id))
+    conn.commit()
+    conn.close()
 
 
 def get_pending_users():
@@ -180,15 +271,21 @@ def block_user(user_id):
 
 def unblock_user(user_id):
     conn = get_conn()
-    conn.execute("UPDATE users SET is_blocked = 0, status = 'approved' WHERE user_id = ?", (user_id,))
+    conn.execute("UPDATE users SET is_blocked = 0, is_suspended = 0, status = 'approved' WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
 
 
-def soft_delete_user(user_id):
-    """Hide user from browsing but keep in DB for block/history purposes."""
+def suspend_user(user_id):
     conn = get_conn()
-    conn.execute("UPDATE users SET status = 'deleted' WHERE user_id = ?", (user_id,))
+    conn.execute("UPDATE users SET is_suspended = 1 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def unsuspend_user(user_id):
+    conn = get_conn()
+    conn.execute("UPDATE users SET is_suspended = 0 WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
 
@@ -198,6 +295,60 @@ def delete_id_card(user_id):
     conn.execute("UPDATE users SET id_card_file_id = NULL WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+
+def add_report(reporter_id, reported_id, reason, evidence_file_id=None):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO reports (reporter_id, reported_id, reason, evidence_file_id)
+        VALUES (?, ?, ?, ?)
+    """, (reporter_id, reported_id, reason, evidence_file_id))
+    conn.commit()
+    conn.close()
+
+
+def get_pending_reports():
+    conn = get_conn()
+    reports = conn.execute("""
+        SELECT r.*, 
+               u1.name as reporter_name,
+               u2.name as reported_name, u2.age as reported_age,
+               u2.gender as reported_gender
+        FROM reports r
+        LEFT JOIN users u1 ON r.reporter_id = u1.user_id
+        LEFT JOIN users u2 ON r.reported_id = u2.user_id
+        WHERE r.status = 'pending'
+        ORDER BY r.created_at DESC
+    """).fetchall()
+    conn.close()
+    return reports
+
+
+def resolve_report(report_id, status):
+    conn = get_conn()
+    conn.execute("UPDATE reports SET status = ? WHERE id = ?", (status, report_id))
+    conn.commit()
+    conn.close()
+
+
+def add_bug_report(user_id, description):
+    conn = get_conn()
+    conn.execute("INSERT INTO bug_reports (user_id, description) VALUES (?, ?)",
+                 (user_id, description))
+    conn.commit()
+    conn.close()
+
+
+def get_open_bug_reports():
+    conn = get_conn()
+    bugs = conn.execute("""
+        SELECT b.*, u.name FROM bug_reports b
+        LEFT JOIN users u ON b.user_id = u.user_id
+        WHERE b.status = 'open'
+        ORDER BY b.created_at DESC
+    """).fetchall()
+    conn.close()
+    return bugs
 
 
 def set_premium(user_id, days=30):
@@ -246,39 +397,32 @@ def check_and_use_like(user_id):
     if not user:
         conn.close()
         return False, 0
-
     today = date.today().isoformat()
-
     if user["is_premium"] and user["premium_until"]:
         if datetime.fromisoformat(user["premium_until"]) < datetime.now():
             conn.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (user_id,))
             conn.commit()
             user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
-
     if user["is_premium"]:
         conn.close()
         return True, -1
-
     if user["likes_reset_date"] != today:
         conn.execute("UPDATE users SET likes_used_today = 0, likes_reset_date = ? WHERE user_id = ?",
                      (today, user_id))
         conn.commit()
         user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
-
     if user["bonus_likes"] > 0:
         conn.execute("UPDATE users SET bonus_likes = bonus_likes - 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         remaining = user["bonus_likes"] - 1
         conn.close()
         return True, remaining
-
     if user["likes_used_today"] < FREE_DAILY_LIKES:
         conn.execute("UPDATE users SET likes_used_today = likes_used_today + 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         remaining = FREE_DAILY_LIKES - user["likes_used_today"] - 1
         conn.close()
         return True, remaining
-
     conn.close()
     return False, 0
 
@@ -304,17 +448,15 @@ def get_likes_status(user_id):
 def get_next_profile(viewer_id, viewer_gender, filter_region=None):
     target_gender = "male" if viewer_gender == "female" else "female"
     conn = get_conn()
-
     region_filter = ""
     params = [target_gender, viewer_id, viewer_id]
-
     if filter_region:
         region_filter = "AND region = ?"
         params.append(filter_region)
-
     profile = conn.execute(f"""
         SELECT * FROM users
-        WHERE gender = ? AND status = 'approved' AND is_blocked = 0 AND user_id != ?
+        WHERE gender = ? AND status = 'approved' AND is_blocked = 0
+        AND is_suspended = 0 AND user_id != ?
         AND user_id NOT IN (SELECT viewed_id FROM seen WHERE viewer_id = ?)
         {region_filter}
         ORDER BY is_premium DESC, RANDOM()
@@ -392,8 +534,13 @@ def get_stats():
     pending = conn.execute("SELECT COUNT(*) as c FROM users WHERE status='pending'").fetchone()["c"]
     approved = conn.execute("SELECT COUNT(*) as c FROM users WHERE status='approved'").fetchone()["c"]
     blocked = conn.execute("SELECT COUNT(*) as c FROM users WHERE is_blocked=1").fetchone()["c"]
+    suspended = conn.execute("SELECT COUNT(*) as c FROM users WHERE is_suspended=1").fetchone()["c"]
     matches = conn.execute("SELECT COUNT(*) as c FROM matches").fetchone()["c"]
     premium = conn.execute("SELECT COUNT(*) as c FROM users WHERE is_premium=1").fetchone()["c"]
+    reports = conn.execute("SELECT COUNT(*) as c FROM reports WHERE status='pending'").fetchone()["c"]
+    bugs = conn.execute("SELECT COUNT(*) as c FROM bug_reports WHERE status='open'").fetchone()["c"]
+    deleted = conn.execute("SELECT COUNT(*) as c FROM deleted_users").fetchone()["c"]
     conn.close()
-    return {"total": total, "pending": pending, "approved": approved,
-            "blocked": blocked, "matches": matches, "premium": premium}
+    return {"total": total, "pending": pending, "approved": approved, "blocked": blocked,
+            "suspended": suspended, "matches": matches, "premium": premium,
+            "reports": reports, "bugs": bugs, "deleted": deleted}
