@@ -19,12 +19,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set!")
 
 
 def main():
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
 
     registration_conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -38,7 +46,8 @@ def main():
             ID_CARD: [MessageHandler(filters.PHOTO | filters.Document.ALL, get_id_card)],
         },
         fallbacks=[CommandHandler("start", start)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=False,
     )
 
     app.add_handler(registration_conv)
@@ -49,8 +58,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_admin_callback, pattern="^(approve|reject|block|unblock|delete_id|view_id|appeal_)"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_appeal_message))
 
-    logger.info("💋 Flirt40 Bot started!")
-    app.run_polling()
+    logger.info("Flirt40 Bot started!")
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
