@@ -33,8 +33,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if existing["status"] == "pending":
             await update.message.reply_text(
-                "⏳ *פרופילך ממתין לאישור | Pending approval*\n\n"
-                "נחזור אליך בקרוב! | _We'll get back to you soon!_",
+                "⏳ *פרופילך ממתין לאישור | Your profile is pending approval*\n\n"
+                "🇮🇱 ההנהלה תבדוק את פרופילך ותחזור אליך בהקדם. תקבל הודעה כשהפרופיל יאושר.\n"
+                "🇬🇧 The admin will review your profile shortly. You'll receive a message once approved.\n\n"
+                "🙏 תודה על הסבלנות! | _Thank you for your patience!_",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
@@ -173,7 +175,7 @@ async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📸 *שלח/י תמונות פרופיל | Send profile photos*\n\n"
         "🇮🇱 שלח/י עד 5 תמונות, אחת אחת. כשסיימת שלח/י /done\n"
         "🇬🇧 Send up to 5 photos, one by one. When done, send /done\n\n"
-        "_(תמונה ראשונה תהיה תמונת הפרופיל הראשית | First photo will be your main profile photo)_",
+        "_(התמונה הראשונה תהיה תמונת הפרופיל הראשית)_",
         parse_mode="Markdown"
     )
     return PHOTOS
@@ -182,8 +184,7 @@ async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photos = context.user_data.get("photos", [])
 
-    # /done command
-    if update.message.text and update.message.text.strip() == "/done":
+    if update.message.text and update.message.text.strip() in ["/done", "done"]:
         if len(photos) == 0:
             await update.message.reply_text(
                 "❌ שלח/י לפחות תמונה אחת | _Please send at least one photo_"
@@ -200,8 +201,7 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(photos) >= MAX_PHOTOS:
         await update.message.reply_text(
-            f"✅ כבר יש לך {MAX_PHOTOS} תמונות - זה המקסימום!\n"
-            f"שלח/י /done להמשך | _Send /done to continue_"
+            f"✅ כבר יש לך {MAX_PHOTOS} תמונות - שלח/י /done להמשך"
         )
         return PHOTOS
 
@@ -214,12 +214,11 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ תמונה {len(photos)} התקבלה!\n"
             f"אפשר לשלוח עוד {remaining} תמונות, או /done לסיום\n"
-            f"_Photo {len(photos)} received! Send {remaining} more or /done to finish_"
+            f"_Photo {len(photos)} received! {remaining} more allowed, or /done_"
         )
     else:
         await update.message.reply_text(
-            f"✅ {MAX_PHOTOS} תמונות התקבלו - מקסימום!\n"
-            "שלח/י /done להמשך | _Send /done to continue_"
+            f"✅ {MAX_PHOTOS} תמונות - מקסימום!\nשלח/י /done להמשך"
         )
     return PHOTOS
 
@@ -231,14 +230,13 @@ async def _ask_for_id(update, context):
         "לאימות גיל ושם בלבד - כדי להבטיח שהקהילה שלנו אמינה ובטוחה.\n"
         "🔒 התז נגיש אך ורק להנהלה ונמחק לאחר השלמת תהליך האימות.\n\n"
         "🇬🇧 *Why do we need this?*\n"
-        "For age and name verification only - to ensure our community is safe and genuine.\n"
-        "🔒 Your ID is only accessible to the admin and deleted after verification is complete.",
+        "For age and name verification only - to keep our community safe.\n"
+        "🔒 Your ID is only accessible to admin and deleted after verification.",
         parse_mode="Markdown"
     )
 
 
 async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Handle /done in ID_CARD state (in case user types it)
     if update.message.text:
         await update.message.reply_text(
             "❌ שלח/י צילום תעודת זהות | _Please send a photo of your ID_"
@@ -270,21 +268,24 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus_msg = ""
     if bonus > 0:
         bonus_msg = (
-            f"\n\n🎁 *אתה בין {FIRST_USERS_COUNT} הנרשמים הראשונים!*\n"
-            f"קיבלת {bonus} לייקים מתנה! 🎉\n"
-            f"_You're among the first {FIRST_USERS_COUNT} users! {bonus} bonus likes await you!_"
+            f"\n\n🎁 *אתה בין {20} הנרשמים הראשונים!*\n"
+            f"קיבלת {bonus} לייקים מתנה שיחכו לך לאחר האישור! 🎉\n"
+            f"_You're among the first 20 users! {bonus} bonus likes await you!_"
         )
 
+    # Send confirmation to user
     await update.message.reply_text(
         "✅ *ההרשמה התקבלה! | Registration received!*\n\n"
-        "🇮🇱 פרופילך ממתין לאישור ההנהלה. נחזור אליך תוך 24 שעות. 🙏\n"
-        "🇬🇧 Your profile is pending admin approval. We'll respond within 24 hours. 🙏"
+        "🇮🇱 פרופילך ממתין לאישור ההנהלה.\n"
+        "תקבל הודעה ישירות כאן ברגע שהפרופיל יאושר. 🙏\n\n"
+        "🇬🇧 Your profile is pending admin approval.\n"
+        "You'll receive a message here as soon as it's approved. 🙏"
         + bonus_msg,
         parse_mode="Markdown"
     )
 
+    # Notify admin with full profile
     if ADMIN_ID:
-        from database.db import get_user_photos, REGIONS
         photos_list = data.get("photos", [])
         gender_text = "👩 אישה" if data["gender"] == "female" else "👨 גבר"
         region_name = REGIONS.get(data["region"], data["region"])
@@ -298,29 +299,36 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]]
 
         caption = (
-            f"📋 *בקשת הרשמה - Flirt40*\n\n"
-            f"👤 {data['name']}, גיל {data['age']}\n"
-            f"📍 {region_name} - {data['city']} | {gender_text}\n"
+            f"📋 *בקשת הרשמה חדשה - Flirt40*\n\n"
+            f"👤 שם: {data['name']}\n"
+            f"🎂 גיל: {data['age']}\n"
+            f"📍 אזור: {region_name} - {data['city']}\n"
+            f"{gender_text}\n"
             f"📝 {data['bio']}\n"
-            f"🎁 בונוס לייקים: {bonus}\n"
-            f"🆔 `{update.effective_user.id}` | @{update.effective_user.username or 'אין'}"
+            f"🎁 בונוס לייקים: {bonus}\n\n"
+            f"🆔 ID: `{update.effective_user.id}`"
         )
 
-        if photos_list:
-            await context.bot.send_photo(
-                chat_id=ADMIN_ID,
-                photo=photos_list[0],
-                caption=caption,
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            # Send extra photos if any
-            for extra_photo in photos_list[1:]:
-                await context.bot.send_photo(chat_id=ADMIN_ID, photo=extra_photo)
-        else:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID, text=caption, parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+        try:
+            if photos_list:
+                await context.bot.send_photo(
+                    chat_id=ADMIN_ID,
+                    photo=photos_list[0],
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                for extra_photo in photos_list[1:]:
+                    await context.bot.send_photo(chat_id=ADMIN_ID, photo=extra_photo,
+                                                 caption=f"📸 תמונה נוספת של {data['name']}")
+            else:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID, text=caption,
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to notify admin: {e}")
 
     return ConversationHandler.END
