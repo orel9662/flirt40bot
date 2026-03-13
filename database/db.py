@@ -8,6 +8,12 @@ FIRST_USERS_COUNT = 20
 FREE_DAILY_LIKES = 10
 PREMIUM_PRICE_STARS = 1000
 
+REGIONS = {
+    "north": "צפון 🌿",
+    "center": "מרכז 🏙",
+    "south": "דרום 🌵"
+}
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -25,10 +31,9 @@ def init_db():
             gender TEXT,
             name TEXT,
             age INTEGER,
+            region TEXT,
             city TEXT,
             bio TEXT,
-            photo_file_id TEXT,
-            id_card_file_id TEXT,
             status TEXT DEFAULT 'pending',
             is_blocked INTEGER DEFAULT 0,
             is_premium INTEGER DEFAULT 0,
@@ -36,6 +41,17 @@ def init_db():
             bonus_likes INTEGER DEFAULT 0,
             likes_used_today INTEGER DEFAULT 0,
             likes_reset_date TEXT,
+            filter_region TEXT,
+            id_card_file_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            file_id TEXT,
+            position INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -99,15 +115,20 @@ def init_db():
     conn.close()
 
 
-def add_user(user_id, username, gender, name, age, city, bio, photo_file_id, id_card_file_id):
+def add_user(user_id, username, gender, name, age, region, city, bio, id_card_file_id, photos):
     conn = get_conn()
     count = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
     bonus = FIRST_USERS_BONUS if count < FIRST_USERS_COUNT else 0
     conn.execute("""
         INSERT OR REPLACE INTO users
-        (user_id, username, gender, name, age, city, bio, photo_file_id, id_card_file_id, status, bonus_likes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    """, (user_id, username, gender, name, age, city, bio, photo_file_id, id_card_file_id, bonus))
+        (user_id, username, gender, name, age, region, city, bio, id_card_file_id, status, bonus_likes, filter_region)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    """, (user_id, username, gender, name, age, region, city, bio, id_card_file_id, bonus, region))
+    # Delete old photos and add new ones
+    conn.execute("DELETE FROM user_photos WHERE user_id = ?", (user_id,))
+    for i, file_id in enumerate(photos):
+        conn.execute("INSERT INTO user_photos (user_id, file_id, position) VALUES (?, ?, ?)",
+                     (user_id, file_id, i))
     conn.commit()
     conn.close()
     return bonus
@@ -118,6 +139,15 @@ def get_user(user_id):
     user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
     conn.close()
     return user
+
+
+def get_user_photos(user_id):
+    conn = get_conn()
+    photos = conn.execute(
+        "SELECT file_id FROM user_photos WHERE user_id = ? ORDER BY position", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [p["file_id"] for p in photos]
 
 
 def get_pending_users():
@@ -155,6 +185,14 @@ def unblock_user(user_id):
     conn.close()
 
 
+def soft_delete_user(user_id):
+    """Hide user from browsing but keep in DB for block/history purposes."""
+    conn = get_conn()
+    conn.execute("UPDATE users SET status = 'deleted' WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
 def delete_id_card(user_id):
     conn = get_conn()
     conn.execute("UPDATE users SET id_card_file_id = NULL WHERE user_id = ?", (user_id,))
@@ -175,6 +213,13 @@ def set_premium(user_id, days=30):
 def revoke_premium(user_id):
     conn = get_conn()
     conn.execute("UPDATE users SET is_premium = 0, premium_until = NULL WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_filter_region(user_id, region):
+    conn = get_conn()
+    conn.execute("UPDATE users SET filter_region = ? WHERE user_id = ?", (region, user_id))
     conn.commit()
     conn.close()
 
@@ -204,7 +249,6 @@ def check_and_use_like(user_id):
 
     today = date.today().isoformat()
 
-    # Check premium expiry
     if user["is_premium"] and user["premium_until"]:
         if datetime.fromisoformat(user["premium_until"]) < datetime.now():
             conn.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (user_id,))
@@ -215,14 +259,12 @@ def check_and_use_like(user_id):
         conn.close()
         return True, -1
 
-    # Reset daily likes
     if user["likes_reset_date"] != today:
         conn.execute("UPDATE users SET likes_used_today = 0, likes_reset_date = ? WHERE user_id = ?",
                      (today, user_id))
         conn.commit()
         user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
 
-    # Use bonus likes first
     if user["bonus_likes"] > 0:
         conn.execute("UPDATE users SET bonus_likes = bonus_likes - 1 WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -230,7 +272,6 @@ def check_and_use_like(user_id):
         conn.close()
         return True, remaining
 
-    # Use daily likes
     if user["likes_used_today"] < FREE_DAILY_LIKES:
         conn.execute("UPDATE users SET likes_used_today = likes_used_today + 1 WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -260,16 +301,25 @@ def get_likes_status(user_id):
     return {"type": "free", "daily_remaining": max(0, daily_remaining), "bonus_likes": user["bonus_likes"]}
 
 
-def get_next_profile(viewer_id, viewer_gender):
+def get_next_profile(viewer_id, viewer_gender, filter_region=None):
     target_gender = "male" if viewer_gender == "female" else "female"
     conn = get_conn()
-    profile = conn.execute("""
+
+    region_filter = ""
+    params = [target_gender, viewer_id, viewer_id]
+
+    if filter_region:
+        region_filter = "AND region = ?"
+        params.append(filter_region)
+
+    profile = conn.execute(f"""
         SELECT * FROM users
         WHERE gender = ? AND status = 'approved' AND is_blocked = 0 AND user_id != ?
         AND user_id NOT IN (SELECT viewed_id FROM seen WHERE viewer_id = ?)
+        {region_filter}
         ORDER BY is_premium DESC, RANDOM()
         LIMIT 1
-    """, (target_gender, viewer_id, viewer_id)).fetchone()
+    """, params).fetchone()
     conn.close()
     return profile
 
@@ -287,14 +337,6 @@ def add_like(from_user_id, to_user_id, message=None):
                  (from_user_id, to_user_id, message))
     conn.commit()
     conn.close()
-
-
-def get_like_message(from_user_id, to_user_id):
-    conn = get_conn()
-    result = conn.execute("SELECT message FROM likes WHERE from_user_id = ? AND to_user_id = ?",
-                          (from_user_id, to_user_id)).fetchone()
-    conn.close()
-    return result["message"] if result else None
 
 
 def check_mutual_like(user1_id, user2_id):
