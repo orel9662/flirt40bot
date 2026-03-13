@@ -45,7 +45,10 @@ async def handle_menu_callbacks(update, context):
 
     elif data == "menu_premium":
         track_premium_interest(user_id)
-        keyboard = [[InlineKeyboardButton("💰 רכישה | Purchase", callback_data="menu_premium_buy")]]
+        keyboard = [
+            [InlineKeyboardButton("💰 רכישה | Purchase", callback_data="menu_premium_buy")],
+            [InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]
+        ]
         await query.message.reply_text(
             "⭐ *Flirt40 Premium*\n\n"
             "✅ לייקים ללא הגבלה\n"
@@ -60,13 +63,19 @@ async def handle_menu_callbacks(update, context):
 
     elif data == "menu_premium_buy":
         track_premium_interest(user_id)
+        back_kb2 = [[InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]]
         await query.message.reply_text(
             "🚧 *הפיצ'ר בפיתוח | Feature in development*\n\n"
             "🇮🇱 אנחנו עובדים על מערכת התשלומים ונשמח לראותך כשהיא תהיה מוכנה!\n"
             "🇬🇧 We're working on the payment system and look forward to seeing you when it's ready!\n\n"
             "💌 נשלח לך הודעה כשהפרמיום יהיה זמין.\n_We'll message you when Premium is available._",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(back_kb2)
         )
+
+    elif data == "menu_back":
+        await _send_main_menu(context, user_id)
+        return
 
     elif data == "menu_status":
         user = get_user(user_id)
@@ -81,12 +90,14 @@ async def handle_menu_callbacks(update, context):
         else:
             likes_text = "?"
         region_name = REGIONS.get(user["region"], "")
+        back_kb = [[InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]]
         await query.message.reply_text(
             f"👤 *{user['name']}*, גיל {user['age']}\n"
             f"📍 {region_name} - {user['city']}\n"
             f"🏷 {'⭐ פרמיום' if user['is_premium'] else 'חינמי'}\n"
             f"🔢 {likes_text}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(back_kb)
         )
 
     elif data == "menu_report":
