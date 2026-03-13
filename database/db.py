@@ -528,6 +528,54 @@ def get_all_approved_users():
     return users
 
 
+def track_premium_interest(user_id):
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS premium_interest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("INSERT INTO premium_interest (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_premium_interested_users():
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS premium_interest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    results = conn.execute("""
+        SELECT pi.user_id, pi.created_at, u.name, u.age, u.region, u.city, u.gender
+        FROM premium_interest pi
+        LEFT JOIN users u ON pi.user_id = u.user_id
+        ORDER BY pi.created_at DESC
+        LIMIT 50
+    """).fetchall()
+    conn.close()
+    return results
+
+
+def get_all_users_detailed():
+    conn = get_conn()
+    users = conn.execute("""
+        SELECT u.*,
+               (SELECT COUNT(*) FROM reports WHERE reported_id = u.user_id) as report_count,
+               (SELECT COUNT(*) FROM likes WHERE from_user_id = u.user_id) as likes_given,
+               (SELECT COUNT(*) FROM likes WHERE to_user_id = u.user_id) as likes_received
+        FROM users u
+        ORDER BY u.created_at DESC
+    """).fetchall()
+    conn.close()
+    return users
+
+
 def get_stats():
     conn = get_conn()
     total = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
@@ -540,7 +588,11 @@ def get_stats():
     reports = conn.execute("SELECT COUNT(*) as c FROM reports WHERE status='pending'").fetchone()["c"]
     bugs = conn.execute("SELECT COUNT(*) as c FROM bug_reports WHERE status='open'").fetchone()["c"]
     deleted = conn.execute("SELECT COUNT(*) as c FROM deleted_users").fetchone()["c"]
+    try:
+        interested = conn.execute("SELECT COUNT(*) as c FROM premium_interest").fetchone()["c"]
+    except Exception:
+        interested = 0
     conn.close()
     return {"total": total, "pending": pending, "approved": approved, "blocked": blocked,
             "suspended": suspended, "matches": matches, "premium": premium,
-            "reports": reports, "bugs": bugs, "deleted": deleted}
+            "reports": reports, "bugs": bugs, "deleted": deleted, "premium_interest": interested}
