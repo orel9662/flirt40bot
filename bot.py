@@ -262,7 +262,7 @@ async def handle_menu_callbacks(update, context):
         await query.message.reply_text(msg, parse_mode="Markdown")
         return
 
-    if data == "menu_delete":
+    if data == "menu_delete_disabled":  # disabled
         yes = "🗑 כן, מחק" if lang == "he" else "🗑 Yes, delete"
         no = "❌ ביטול" if lang == "he" else "❌ Cancel"
         msg = (
