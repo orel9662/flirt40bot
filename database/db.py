@@ -645,3 +645,28 @@ def get_stats():
     return {"total": total, "pending": pending, "approved": approved, "blocked": blocked,
             "suspended": suspended, "matches": matches, "premium": premium,
             "reports": reports, "bugs": bugs, "deleted": deleted, "premium_interest": interested}
+
+
+def search_users(query):
+    conn = get_conn()
+    try:
+        uid = int(query)
+        users = conn.execute(
+            "SELECT u.*, "
+            "(SELECT COUNT(*) FROM reports WHERE reported_id = u.user_id) as report_count, "
+            "(SELECT COUNT(*) FROM likes WHERE from_user_id = u.user_id) as likes_given, "
+            "(SELECT COUNT(*) FROM likes WHERE to_user_id = u.user_id) as likes_received "
+            "FROM users u WHERE u.user_id = ?",
+            (uid,)
+        ).fetchall()
+    except ValueError:
+        users = conn.execute(
+            "SELECT u.*, "
+            "(SELECT COUNT(*) FROM reports WHERE reported_id = u.user_id) as report_count, "
+            "(SELECT COUNT(*) FROM likes WHERE from_user_id = u.user_id) as likes_given, "
+            "(SELECT COUNT(*) FROM likes WHERE to_user_id = u.user_id) as likes_received "
+            "FROM users u WHERE LOWER(u.name) LIKE LOWER(?)",
+            (f"%{query}%",)
+        ).fetchall()
+    conn.close()
+    return users
