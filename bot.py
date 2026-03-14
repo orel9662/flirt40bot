@@ -33,6 +33,9 @@ if not BOT_TOKEN:
 WAITING_REPORT_REASON = {}
 WAITING_REPORT_EVIDENCE = {}
 WAITING_BUG = set()
+WAITING_EDIT_BIO = set()
+WAITING_EDIT_PHOTOS = set()  # set of user_ids adding photos
+WAITING_DELETE_PHOTO = {}  # user_id -> list of file_ids to choose from
 
 
 async def handle_menu_callbacks(update, context):
@@ -150,6 +153,79 @@ async def handle_menu_callbacks(update, context):
         await show_settings_menu(query.message, user_id, lang)
         return
 
+    if data == "settings_edit_bio":
+        WAITING_EDIT_BIO.add(user_id)
+        msg = "✏️ *ערוך ביו*\n\nכתוב/י ביו חדש (עד 300 תווים):" if lang == "he" else "✏️ *Edit bio*\n\nWrite your new bio (max 300 chars):"
+        kb = [[InlineKeyboardButton("❌ ביטול | Cancel", callback_data="settings_cancel_edit")]]
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data == "settings_edit_photos":
+        from database.db import get_user_photos as gup
+        photos = gup(user_id)
+        msg_he = f"📸 *ערוך תמונות*\n\nיש לך {len(photos)} תמונות כרגע (מינימום 1, מקסימום 5)."
+        msg_en = f"📸 *Edit photos*\n\nYou have {len(photos)} photos (min 1, max 5)."
+        msg = msg_he if lang == "he" else msg_en
+        kb = []
+        if len(photos) < 5:
+            add_label = "➕ הוסף תמונה" if lang == "he" else "➕ Add photo"
+            kb.append([InlineKeyboardButton(add_label, callback_data="settings_add_photo")])
+        if len(photos) > 1:
+            del_label = "🗑 מחק תמונה" if lang == "he" else "🗑 Delete photo"
+            kb.append([InlineKeyboardButton(del_label, callback_data="settings_delete_photo")])
+        kb.append([InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_settings")])
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data == "settings_add_photo":
+        WAITING_EDIT_PHOTOS.add(user_id)
+        msg = "📸 שלח/י תמונה חדשה:" if lang == "he" else "📸 Send your new photo:"
+        kb = [[InlineKeyboardButton("❌ ביטול | Cancel", callback_data="settings_cancel_edit")]]
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data == "settings_delete_photo":
+        from database.db import get_user_photos as gup
+        photos = gup(user_id)
+        msg = "🗑 *בחר/י תמונה למחיקה:*\n\n" if lang == "he" else "🗑 *Choose photo to delete:*\n\n"
+        kb = []
+        for i, _ in enumerate(photos):
+            kb.append([InlineKeyboardButton(f"תמונה {i+1} | Photo {i+1}", callback_data=f"settings_del_photo_{i}")])
+        kb.append([InlineKeyboardButton("🔙 חזרה | Back", callback_data="settings_edit_photos")])
+        # Send photos so user can see them
+        for i, fid in enumerate(photos):
+            await query.message.reply_photo(photo=fid, caption=f"תמונה {i+1} | Photo {i+1}")
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("settings_del_photo_"):
+        idx = int(data.replace("settings_del_photo_", ""))
+        from database.db import get_user_photos as gup, get_conn
+        photos = gup(user_id)
+        if len(photos) <= 1:
+            msg = "❌ לא ניתן למחוק - חייבת להישאר לפחות תמונה אחת!" if lang == "he" else "❌ Cannot delete - must keep at least one photo!"
+            await query.message.reply_text(msg)
+            return
+        file_to_del = photos[idx]
+        conn = get_conn()
+        conn.execute("DELETE FROM user_photos WHERE user_id = ? AND file_id = ?", (user_id, file_to_del))
+        conn.commit()
+        conn.close()
+        msg = f"✅ תמונה {idx+1} נמחקה!" if lang == "he" else f"✅ Photo {idx+1} deleted!"
+        await query.message.reply_text(msg)
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data == "settings_cancel_edit":
+        WAITING_EDIT_BIO.discard(user_id)
+        WAITING_EDIT_PHOTOS.discard(user_id)
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data == "menu_settings":
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
     if data == "menu_report":
         msg = (
             "🚨 *דיווח על משתמש*\n\nשלח: `/report [ID]`\n\nאת ה-ID תוכל/י לבקש מהמשתמש ישירות."
@@ -198,11 +274,15 @@ async def show_settings_menu(message, user_id, lang):
         age_label = f"👁 Show age: {'Yes ✅' if show_age else 'No ❌'}"
         notif_label = f"🔔 Notifications: {'On ✅' if notif else 'Off ❌'}"
 
+    edit_bio = "✏️ ערוך ביו" if lang == "he" else "✏️ Edit bio"
+    edit_photos = "📸 ערוך תמונות" if lang == "he" else "📸 Edit photos"
     keyboard = [
         [InlineKeyboardButton("🇮🇱 עברית" + (" ✅" if lang == "he" else ""), callback_data="settings_lang_he"),
          InlineKeyboardButton("🇬🇧 English" + (" ✅" if lang == "en" else ""), callback_data="settings_lang_en")],
         [InlineKeyboardButton(age_label, callback_data=f"settings_age_{0 if show_age else 1}")],
         [InlineKeyboardButton(notif_label, callback_data=f"settings_notif_{0 if notif else 1}")],
+        [InlineKeyboardButton(edit_bio, callback_data="settings_edit_bio"),
+         InlineKeyboardButton(edit_photos, callback_data="settings_edit_photos")],
         [InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]
     ]
     await message.reply_text(
@@ -233,6 +313,24 @@ async def handle_message(update, context):
     if not update.message:
         return
     user_id = update.effective_user.id
+
+    # Edit bio
+    if update.message.text and user_id in WAITING_EDIT_BIO:
+        bio = update.message.text.strip()
+        if len(bio) > 300:
+            await update.message.reply_text("❌ עד 300 תווים | Max 300 chars")
+            return
+        WAITING_EDIT_BIO.discard(user_id)
+        from database.db import get_conn
+        conn = get_conn()
+        conn.execute("UPDATE users SET bio = ? WHERE user_id = ?", (bio, user_id))
+        conn.commit()
+        conn.close()
+        lang = get_user_settings(user_id).get("language", "he")
+        msg = "✅ הביו עודכן!" if lang == "he" else "✅ Bio updated!"
+        await update.message.reply_text(msg)
+        await send_main_menu(context, user_id)
+        return
 
     if update.message.text and user_id in WAITING_REPORT_REASON:
         target_id = WAITING_REPORT_REASON.pop(user_id)
@@ -294,6 +392,25 @@ async def handle_photo_message(update, context):
     user_id = update.effective_user.id
     if user_id in WAITING_REPORT_EVIDENCE:
         await handle_message(update, context)
+        return
+    if user_id in WAITING_EDIT_PHOTOS:
+        WAITING_EDIT_PHOTOS.discard(user_id)
+        from database.db import get_user_photos as gup, get_conn
+        photos = gup(user_id)
+        if len(photos) >= 5:
+            await update.message.reply_text("❌ כבר יש 5 תמונות - המקסימום! מחק תמונה קודם.")
+            return
+        file_id = update.message.photo[-1].file_id
+        conn = get_conn()
+        pos = len(photos)
+        conn.execute("INSERT INTO user_photos (user_id, file_id, position) VALUES (?, ?, ?)",
+                     (user_id, file_id, pos))
+        conn.commit()
+        conn.close()
+        lang = get_user_settings(user_id).get("language", "he")
+        msg = f"✅ תמונה נוספה! יש לך עכשיו {pos+1} תמונות." if lang == "he" else f"✅ Photo added! You now have {pos+1} photos."
+        await update.message.reply_text(msg)
+        await send_main_menu(context, user_id)
         return
     await handle_chat_message(update, context)
 
