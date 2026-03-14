@@ -157,6 +157,14 @@ def init_db():
         )
     """)
     c.execute("""
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER PRIMARY KEY,
+            language TEXT DEFAULT 'he',
+            show_age INTEGER DEFAULT 1,
+            notifications INTEGER DEFAULT 1
+        )
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS share_consents (
             user_id INTEGER,
             partner_id INTEGER,
@@ -376,6 +384,18 @@ def revoke_premium(user_id):
     conn.close()
 
 
+def set_premium_all(days=30):
+    from datetime import datetime, timedelta
+    conn = get_conn()
+    until = datetime.now() + timedelta(days=days)
+    affected = conn.execute("SELECT COUNT(*) as c FROM users WHERE status='approved' AND is_blocked=0").fetchone()["c"]
+    conn.execute("UPDATE users SET is_premium=1, premium_until=? WHERE status='approved' AND is_blocked=0",
+                 (until.isoformat(),))
+    conn.commit()
+    conn.close()
+    return affected, until
+
+
 def set_filter_region(user_id, region):
     conn = get_conn()
     conn.execute("UPDATE users SET filter_region = ? WHERE user_id = ?", (region, user_id))
@@ -534,6 +554,27 @@ def get_all_approved_users():
     users = conn.execute("SELECT * FROM users WHERE status = 'approved' AND is_blocked = 0").fetchall()
     conn.close()
     return users
+
+
+def get_user_settings(user_id):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return {"language": "he", "show_age": 1, "notifications": 1}
+
+
+def update_user_setting(user_id, key, value):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO user_settings (user_id, language, show_age, notifications)
+        VALUES (?, 'he', 1, 1)
+        ON CONFLICT(user_id) DO NOTHING
+    """, (user_id,))
+    conn.execute(f"UPDATE user_settings SET {key} = ? WHERE user_id = ?", (value, user_id))
+    conn.commit()
+    conn.close()
 
 
 def track_premium_interest(user_id):
