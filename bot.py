@@ -21,7 +21,7 @@ from handlers.chat import handle_chat_message, handle_chat_callbacks
 from database.db import (
     init_db, get_user, get_likes_status, REGIONS,
     add_report, add_bug_report, delete_user_self, track_premium_interest,
-    get_user_settings, update_user_setting
+    get_user_settings, update_user_setting, add_user_message, get_unread_messages_count
 )
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -398,6 +398,19 @@ async def handle_message(update, context):
     if not update.message.text:
         return
 
+    # Forward message to admin inbox (if approved user, not in any other flow)
+    user = get_user(user_id)
+    if user and user.get("status") == "approved" and not user.get("is_blocked"):
+        # Only save if not in any waiting state
+        not_in_flow = (
+            user_id not in WAITING_REPORT_REASON and
+            user_id not in WAITING_REPORT_EVIDENCE and
+            user_id not in WAITING_BUG and
+            user_id not in WAITING_EDIT_BIO and
+            user_id not in WAITING_EDIT_PHOTOS
+        )
+        # Will be saved after other handlers check - see bottom of function
+
     handled = await handle_chat_message(update, context)
     if handled:
         return
@@ -405,6 +418,19 @@ async def handle_message(update, context):
     if handled:
         return
     await handle_appeal_message(update, context)
+
+    # Save message to admin inbox if approved user
+    user2 = get_user(user_id)
+    if user2 and user2.get("status") == "approved" and not user2.get("is_blocked"):
+        not_in_flow = (
+            user_id not in WAITING_REPORT_REASON and
+            user_id not in WAITING_REPORT_EVIDENCE and
+            user_id not in WAITING_BUG and
+            user_id not in WAITING_EDIT_BIO and
+            user_id not in WAITING_EDIT_PHOTOS
+        )
+        if not_in_flow and update.message and update.message.text:
+            add_user_message(user_id, update.message.text)
 
 
 async def handle_photo_message(update, context):
