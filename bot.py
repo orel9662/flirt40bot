@@ -1,5 +1,8 @@
 import logging
 import os
+import threading
+from flask import Flask, request, session, redirect, jsonify
+from functools import wraps
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -497,6 +500,234 @@ async def menu_command(update, context):
     await send_main_menu(context, update.effective_user.id)
 
 
+# ── Web Admin ──
+flask_app = Flask(__name__)
+flask_app.secret_key = os.environ.get("WEB_SECRET_KEY", "flirt40secret")
+ADMIN_WEB_PASSWORD = os.environ.get("ADMIN_WEB_PASSWORD", "admin123")
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
+
+@flask_app.route("/login", methods=["GET", "POST"])
+def web_login():
+    error = ""
+    if request.method == "POST":
+        if request.form.get("password") == ADMIN_WEB_PASSWORD:
+            session["logged_in"] = True
+            return redirect("/")
+        error = "סיסמה שגויה"
+    return f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8">
+<title>Flirt40 Admin</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0d0d0d;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}.box{{background:#1a1a1a;border:1px solid #333;border-radius:16px;padding:48px;width:360px;text-align:center}}h1{{font-size:2rem;margin-bottom:8px}}p{{color:#888;margin-bottom:32px}}input{{width:100%;padding:14px;background:#111;border:1px solid #333;border-radius:10px;color:#fff;font-size:1rem;margin-bottom:16px;outline:none;text-align:center}}input:focus{{border-color:#e91e8c}}button{{width:100%;padding:14px;background:#e91e8c;border:none;border-radius:10px;color:#fff;font-size:1rem;font-weight:bold;cursor:pointer}}.err{{color:#f44;font-size:.85rem;margin-top:12px}}</style></head>
+<body><div class="box"><h1>💋 Flirt40</h1><p>פאנל ניהול</p>
+<form method="POST"><input type="password" name="password" placeholder="סיסמה" autofocus><button>כניסה</button></form>
+{f'<p class="err">{error}</p>' if error else ''}</div></body></html>"""
+
+@flask_app.route("/logout")
+def web_logout():
+    session.clear()
+    return redirect("/login")
+
+@flask_app.route("/")
+@login_required
+def web_index():
+    from database.db import get_conn, get_stats
+    stats = get_stats()
+    return f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flirt40 Admin</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0d0d0d;color:#fff;font-family:sans-serif}}
+nav{{background:#1a1a1a;border-bottom:1px solid #2a2a2a;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}}
+nav h1{{color:#e91e8c;font-size:1.4rem}}nav a{{color:#aaa;text-decoration:none;margin-right:20px}}
+.container{{max-width:1200px;margin:0 auto;padding:32px}}
+.stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:40px}}
+.stat{{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:24px;text-align:center}}
+.num{{font-size:2.5rem;font-weight:bold;color:#e91e8c}}.label{{color:#888;font-size:.85rem;margin-top:4px}}
+.btn{{display:inline-block;padding:10px 20px;background:#e91e8c;color:#fff;border-radius:8px;text-decoration:none;font-size:.9rem;font-weight:bold;margin:4px}}
+.btn-out{{background:transparent;border:1px solid #e91e8c;color:#e91e8c}}
+</style></head><body>
+<nav><h1>💋 Flirt40 Admin</h1><div><a href="/">🏠 ראשי</a><a href="/users">👥 משתמשים</a><a href="/reports">🚨 דיווחים</a><a href="/logout">יציאה</a></div></nav>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="num">{stats["total"]}</div><div class="label">סה"כ משתמשים</div></div>
+<div class="stat"><div class="num" style="color:#f39c12">{stats["pending"]}</div><div class="label">ממתינים</div></div>
+<div class="stat"><div class="num" style="color:#2ecc71">{stats["approved"]}</div><div class="label">מאושרים</div></div>
+<div class="stat"><div class="num" style="color:#e74c3c">{stats["blocked"]}</div><div class="label">חסומים</div></div>
+<div class="stat"><div class="num" style="color:#e91e8c">{stats["reports"]}</div><div class="label">דיווחים</div></div>
+<div class="stat"><div class="num" style="color:#9b59b6">{stats["matches"]}</div><div class="label">התאמות</div></div>
+</div>
+<a href="/users?status=pending" class="btn">⏳ ממתינים</a>
+<a href="/users" class="btn btn-out">👥 כל המשתמשים</a>
+<a href="/reports" class="btn btn-out">🚨 דיווחים</a>
+</div></body></html>"""
+
+@flask_app.route("/users")
+@login_required
+def web_users():
+    from database.db import get_conn
+    REGIONS = {{"north":"צפון","center":"מרכז","south":"דרום"}}
+    status_filter = request.args.get("status","")
+    search = request.args.get("search","")
+    page = int(request.args.get("page",1))
+    per_page = 12
+    conn = get_conn()
+    where = "WHERE 1=1"
+    params = []
+    if status_filter:
+        where += " AND status=?"
+        params.append(status_filter)
+    if search:
+        try:
+            uid = int(search)
+            where += " AND user_id=?"
+            params.append(uid)
+        except ValueError:
+            where += " AND LOWER(name) LIKE LOWER(?)"
+            params.append(f"%{{search}}%")
+    total = conn.execute(f"SELECT COUNT(*) as c FROM users {{where}}", params).fetchone()["c"]
+    users_list = conn.execute(f"SELECT * FROM users {{where}} ORDER BY created_at DESC LIMIT ? OFFSET ?", params+[per_page,(page-1)*per_page]).fetchall()
+    conn.close()
+    cards = ""
+    for u in users_list:
+        ge = "👩" if u["gender"]=="female" else "👨"
+        reg = REGIONS.get(u.get("region",""),"")
+        un = f"@{{u['username']}}" if u.get("username") else "אין"
+        st = {{"approved":"✅","pending":"⏳","rejected":"❌","deleted":"🗑"}}.get(u["status"],"❓")
+        flags = ""
+        if u.get("is_blocked"): flags += " 🚫"
+        if u.get("is_suspended"): flags += " ⏸"
+        if u.get("is_premium"): flags += " ⭐"
+        cards += f'''<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px">
+<div style="font-size:1.1rem;font-weight:bold;margin-bottom:8px">{{ge}} {{u["name"]}}, {{u["age"]}}</div>
+<div style="color:#aaa;font-size:.8rem">📍 {{reg}} {{u.get("city","")}} | {{st}}{{flags}}</div>
+<div style="color:#aaa;font-size:.8rem">📱 {{un}} | 🆔 <code>{{u["user_id"]}}</code></div>
+<div style="color:#ccc;font-size:.85rem;margin:8px 0">{{(u.get("bio") or "")[:80]}}</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+<a href="/user/{{u["user_id"]}}" style="padding:6px 12px;border-radius:6px;background:#2a2a2a;color:#fff;text-decoration:none;font-size:.78rem">👁 פרטים</a>
+{'<a href="/action/approve/'+str(u["user_id"])+'" style="padding:6px 12px;border-radius:6px;background:#1a5c2e;color:#2ecc71;text-decoration:none;font-size:.78rem">✅ אשר</a>' if u["status"]=="pending" else ""}
+{'<a href="/action/unblock/'+str(u["user_id"])+'" style="padding:6px 12px;border-radius:6px;background:#1a5c2e;color:#2ecc71;text-decoration:none;font-size:.78rem">🔓 שחרר</a>' if u.get("is_blocked") else '<a href="/action/block/'+str(u["user_id"])+'" style="padding:6px 12px;border-radius:6px;background:#5c1a1a;color:#e74c3c;text-decoration:none;font-size:.78rem">🚫 חסום</a>'}
+</div></div>'''
+    total_pages = max(1,(total+per_page-1)//per_page)
+    pag = "".join([f'<a href="?page={{p}}&status={{status_filter}}&search={{search}}" style="display:inline-block;padding:8px 14px;margin:2px;background:{{"#e91e8c" if p==page else "#1a1a1a"}};color:#fff;border-radius:6px;text-decoration:none">{{p}}</a>' for p in range(1,total_pages+1)])
+    return f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>משתמשים</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0d0d0d;color:#fff;font-family:sans-serif}}
+nav{{background:#1a1a1a;border-bottom:1px solid #2a2a2a;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}}
+nav h1{{color:#e91e8c}}nav a{{color:#aaa;text-decoration:none;margin-right:20px}}
+.container{{max-width:1400px;margin:0 auto;padding:32px}}
+.filters{{display:flex;gap:12px;margin-bottom:28px;flex-wrap:wrap;align-items:center}}
+.filters input{{padding:10px 16px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;width:250px}}
+.fa{{padding:10px 18px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#aaa;text-decoration:none;font-size:.85rem}}
+.fa.active{{background:#e91e8c;color:#fff;border-color:#e91e8c}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}}
+button{{padding:10px 18px;background:#e91e8c;border:none;border-radius:8px;color:#fff;cursor:pointer}}
+code{{background:#111;padding:2px 6px;border-radius:4px;font-size:.75rem}}</style></head><body>
+<nav><h1>💋 Flirt40 Admin</h1><div><a href="/">🏠</a><a href="/users">👥 משתמשים</a><a href="/reports">🚨 דיווחים</a><a href="/logout">יציאה</a></div></nav>
+<div class="container">
+<form method="GET" class="filters">
+<input type="text" name="search" placeholder="🔍 שם או ID..." value="{{search}}">
+<a href="/users" class="fa{" active" if not status_filter else ""}">הכל</a>
+<a href="/users?status=pending" class="fa{" active" if status_filter=="pending" else ""}">⏳ ממתינים</a>
+<a href="/users?status=approved" class="fa{" active" if status_filter=="approved" else ""}">✅ מאושרים</a>
+<button type="submit">חפש</button></form>
+<p style="color:#888;margin-bottom:16px">{{total}} משתמשים</p>
+<div class="grid">{{cards}}</div>
+<div style="margin-top:32px;text-align:center">{{pag}}</div>
+</div></body></html>"""
+
+@flask_app.route("/user/<int:user_id>")
+@login_required
+def web_user_detail(user_id):
+    from database.db import get_conn
+    REGIONS = {{"north":"צפון","center":"מרכז","south":"דרום"}}
+    conn = get_conn()
+    user = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        return "לא נמצא", 404
+    reports = conn.execute("SELECT r.*,u.name as rname FROM reports r LEFT JOIN users u ON r.reporter_id=u.user_id WHERE r.reported_id=? ORDER BY r.created_at DESC", (user_id,)).fetchall()
+    conn.close()
+    ge = "👩" if user["gender"]=="female" else "👨"
+    reg = REGIONS.get(user.get("region",""),"")
+    un = f"@{{user['username']}}" if user.get("username") else "אין"
+    sc = {{"approved":"#2ecc71","pending":"#f39c12","rejected":"#e74c3c","deleted":"#888"}}.get(user["status"],"#fff")
+    reps = "".join([f'<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:16px;margin-bottom:12px"><div style="color:#aaa;font-size:.8rem">מדווח: {{r.get("rname","?")}} | {{str(r.get("created_at",""))[:10]}}</div><div style="margin-top:8px">{{r.get("reason","")}}</div></div>' for r in reports])
+    return f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>{{user["name"]}}</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0d0d0d;color:#fff;font-family:sans-serif}}
+nav{{background:#1a1a1a;border-bottom:1px solid #2a2a2a;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}}
+nav h1{{color:#e91e8c}}nav a{{color:#aaa;text-decoration:none;margin-right:20px}}
+.container{{max-width:900px;margin:0 auto;padding:32px}}
+.btn{{padding:10px 20px;border-radius:8px;text-decoration:none;font-size:.9rem;font-weight:bold;margin:4px;display:inline-block}}
+code{{background:#111;padding:2px 8px;border-radius:4px}}</style></head><body>
+<nav><h1>💋 Flirt40 Admin</h1><div><a href="/">🏠</a><a href="/users">← חזרה</a><a href="/logout">יציאה</a></div></nav>
+<div class="container">
+<div style="font-size:1.8rem;font-weight:bold;margin-bottom:16px">{{ge}} {{user["name"]}}, {{user["age"]}}</div>
+<div style="color:#aaa;margin-bottom:8px">📍 {{reg}} - {{user.get("city","")}}</div>
+<div style="color:#aaa;margin-bottom:8px">📱 {{un}}</div>
+<div style="color:#aaa;margin-bottom:8px">🆔 <code>{{user_id}}</code></div>
+<div style="margin-bottom:8px">סטטוס: <span style="color:{{sc}}">{{user["status"]}}</span>{{"| 🚫 חסום" if user.get("is_blocked") else ""}}{{"| ⏸ מושעה" if user.get("is_suspended") else ""}}{{"| ⭐ פרמיום" if user.get("is_premium") else ""}}</div>
+<div style="background:#1a1a1a;border-radius:8px;padding:16px;margin:16px 0">{{user.get("bio","")}}</div>
+<div style="margin-bottom:24px">
+{'<a href="/action/approve/'+str(user_id)+'" class="btn" style="background:#1a5c2e;color:#2ecc71">✅ אשר</a>' if user["status"]=="pending" else ""}
+{'<a href="/action/unblock/'+str(user_id)+'" class="btn" style="background:#1a5c2e;color:#2ecc71">🔓 שחרר</a>' if user.get("is_blocked") else '<a href="/action/block/'+str(user_id)+'" class="btn" style="background:#5c1a1a;color:#e74c3c">🚫 חסום</a>'}
+{'<a href="/action/unsuspend/'+str(user_id)+'" class="btn" style="background:#5c3a1a;color:#e67e22">▶️ שחרר השעיה</a>' if user.get("is_suspended") else '<a href="/action/suspend/'+str(user_id)+'" class="btn" style="background:#5c3a1a;color:#e67e22">⏸ השעה</a>'}
+<a href="/action/delete/{{user_id}}" class="btn" style="background:#5c1a1a;color:#e74c3c" onclick="return confirm('למחוק?')">🗑 מחק</a>
+</div>
+{f'<h3 style="margin-bottom:16px">דיווחים ({{len(reports)}})</h3>{{reps}}' if reports else '<p style="color:#555">אין דיווחים.</p>'}
+</div></body></html>"""
+
+@flask_app.route("/action/<action>/<int:user_id>")
+@login_required
+def web_action(action, user_id):
+    from database.db import get_conn
+    conn = get_conn()
+    if action == "approve": conn.execute("UPDATE users SET status='approved' WHERE user_id=?", (user_id,))
+    elif action == "block": conn.execute("UPDATE users SET is_blocked=1 WHERE user_id=?", (user_id,))
+    elif action == "unblock": conn.execute("UPDATE users SET is_blocked=0,is_suspended=0,status='approved' WHERE user_id=?", (user_id,))
+    elif action == "suspend": conn.execute("UPDATE users SET is_suspended=1 WHERE user_id=?", (user_id,))
+    elif action == "unsuspend": conn.execute("UPDATE users SET is_suspended=0 WHERE user_id=?", (user_id,))
+    elif action == "delete": conn.execute("UPDATE users SET status='deleted' WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    return redirect(request.referrer or "/users")
+
+@flask_app.route("/reports")
+@login_required
+def web_reports():
+    from database.db import get_conn
+    conn = get_conn()
+    reps = conn.execute("SELECT r.*,u1.name as rname,u2.name as dname FROM reports r LEFT JOIN users u1 ON r.reporter_id=u1.user_id LEFT JOIN users u2 ON r.reported_id=u2.user_id WHERE r.status='pending' ORDER BY r.created_at DESC").fetchall()
+    conn.close()
+    rows = "".join([f'<tr><td>{{r.get("rname","?")}}</td><td><a href="/user/{{r["reported_id"]}}" style="color:#e91e8c">{{r.get("dname","?")}}</a></td><td>{{r.get("reason","")}}</td><td>{{str(r.get("created_at",""))[:10]}}</td><td><a href="/action/suspend/{{r["reported_id"]}}" style="color:#e67e22;text-decoration:none;margin-left:8px">⏸</a><a href="/action/block/{{r["reported_id"]}}" style="color:#e74c3c;text-decoration:none;margin-left:8px">🚫</a><a href="/report/close/{{r["id"]}}" style="color:#2ecc71;text-decoration:none">✅</a></td></tr>' for r in reps])
+    return f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>דיווחים</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0d0d0d;color:#fff;font-family:sans-serif}}
+nav{{background:#1a1a1a;border-bottom:1px solid #2a2a2a;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}}
+nav h1{{color:#e91e8c}}nav a{{color:#aaa;text-decoration:none;margin-right:20px}}
+.container{{max-width:1200px;margin:0 auto;padding:32px}}
+table{{width:100%;border-collapse:collapse}}th{{background:#1a1a1a;padding:12px 16px;text-align:right;color:#888;font-size:.85rem}}
+td{{padding:14px 16px;border-bottom:1px solid #1a1a1a;font-size:.9rem}}</style></head><body>
+<nav><h1>💋 Flirt40 Admin</h1><div><a href="/">🏠</a><a href="/users">👥</a><a href="/reports">🚨 דיווחים</a><a href="/logout">יציאה</a></div></nav>
+<div class="container"><h2 style="margin-bottom:24px">🚨 דיווחים ({{len(reps)}})</h2>
+{{'<table><tr><th>מדווח</th><th>מדוּוח</th><th>סיבה</th><th>תאריך</th><th>פעולה</th></tr>'+rows+'</table>' if reps else '<p style="color:#555">אין דיווחים.</p>'}}
+</div></body></html>"""
+
+@flask_app.route("/report/close/<int:report_id>")
+@login_required
+def web_close_report(report_id):
+    from database.db import get_conn
+    conn = get_conn()
+    conn.execute("UPDATE reports SET status='closed' WHERE id=?", (report_id,))
+    conn.commit()
+    conn.close()
+    return redirect("/reports")
+
+def run_web():
+    port = int(os.environ.get("PORT", 5000))
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
 def main():
     init_db()
     app = (
@@ -564,7 +795,10 @@ def main():
                 pass
 
     app.add_error_handler(error_handler)
-    logger.info("Flirt40 Bot started!")
+    # Start web admin in background thread
+    web_thread = threading.Thread(target=run_web, daemon=True)
+    web_thread.start()
+    logger.info("Flirt40 Bot + Web Admin started!")
     app.run_polling(drop_pending_updates=True)
 
 
