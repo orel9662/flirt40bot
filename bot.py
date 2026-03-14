@@ -499,7 +499,12 @@ async def menu_command(update, context):
 
 def main():
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .arbitrary_callback_data(False)
+        .build()
+    )
 
     registration_conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
