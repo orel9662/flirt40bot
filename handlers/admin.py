@@ -10,6 +10,7 @@ from database.db import (
     get_open_bug_reports, get_user_photos, get_all_users_detailed,
     get_premium_interested_users, soft_delete_user, set_premium_all, search_users,
     get_user_messages, mark_messages_read, close_user_conversation, get_unread_messages_count,
+    set_admin_chat, get_admin_chat,
     RULES_TEXT, REGIONS
 )
 import os
@@ -135,8 +136,10 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             name = m.get("name") or m["from_user_id"]
             kb = [[
                 InlineKeyboardButton("👁 פרופיל", callback_data=f"admin_view_user_{m['from_user_id']}"),
-                InlineKeyboardButton("💬 ענה", callback_data=f"msg_to_{m['from_user_id']}"),
-                InlineKeyboardButton("🔚 סגור שיחה", callback_data=f"msg_close_{m['from_user_id']}")
+                InlineKeyboardButton("💬 שוחח איתו", callback_data=f"admin_start_chat_{m['from_user_id']}"),
+            ], [
+                InlineKeyboardButton("📨 שלח הודעה", callback_data=f"msg_to_{m['from_user_id']}"),
+                InlineKeyboardButton("🔚 סגור", callback_data=f"msg_close_{m['from_user_id']}")
             ]]
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
@@ -145,6 +148,43 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 reply_markup=InlineKeyboardMarkup(kb)
             )
             mark_messages_read(m["from_user_id"])
+        return
+
+    if data.startswith("admin_start_chat_"):
+        uid = int(data.replace("admin_start_chat_", ""))
+        user = get_user(uid)
+        name = user["name"] if user else uid
+        set_admin_chat(uid)
+        kb = [[InlineKeyboardButton("🔚 סיים שיחה", callback_data="admin_end_chat")]]
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💬 *התחלת שיחה עם {name}*\n\nכל הודעה שתשלח כעת תועבר אליו/ה ישירות.\nלסיום לחץ 'סיים שיחה'.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        await context.bot.send_message(
+            chat_id=uid,
+            text="💬 *הנהלת Flirt40 פתחה איתך שיחה*\n\nתוכל/י לשלוח הודעה ולקבל תשובה.",
+            parse_mode="Markdown"
+        )
+        return
+
+    if data == "admin_end_chat":
+        uid = get_admin_chat()
+        set_admin_chat(None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await context.bot.send_message(chat_id=ADMIN_ID, text="✅ השיחה הסתיימה.")
+        if uid:
+            user = get_user(uid)
+            name = user["name"] if user else uid
+            await context.bot.send_message(
+                chat_id=uid,
+                text="✅ השיחה עם ההנהלה הסתיימה.",
+                parse_mode="Markdown"
+            )
         return
 
     if data.startswith("admin_view_user_"):
