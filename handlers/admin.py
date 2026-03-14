@@ -66,11 +66,13 @@ def _user_card_text(user, report_count=0, likes_given=0, likes_received=0):
     if user.get("is_suspended"): flags.append("⏸ מושעה")
     if user["is_premium"]: flags.append("⭐ פרמיום")
     flags_str = " | ".join(flags) if flags else "רגיל"
+    username = f"@{user['username']}" if user.get('username') else "אין"
     return (
         f"{status_emoji} *{user['name']}*, גיל {user['age']}\n"
         f"{gender_text} | 📍 {region_name} - {user['city']}\n"
         f"🏷 {flags_str}\n"
         f"📝 {user['bio']}\n"
+        f"📱 טלגרם: {username}\n"
         f"❤️ נתן: {likes_given} | קיבל: {likes_received} | 🚨 דיווחים: {report_count}\n"
         f"🆔 `{user['user_id']}`\n"
         f"📅 {str(user['created_at'])[:10] if user['created_at'] else '?'}"
