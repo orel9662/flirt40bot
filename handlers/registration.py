@@ -327,12 +327,15 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🪪 תז", callback_data=f"view_id_{update.effective_user.id}")
         ]]
 
+        tg_username = f"@{update.effective_user.username}" if update.effective_user.username else "אין שם משתמש"
+        tg_name = update.effective_user.full_name or ""
         caption = (
             f"📋 *בקשת הרשמה - Flirt40*\n\n"
             f"👤 {data['name']}, גיל {data['age']}\n"
             f"📍 {region_name} - {data['city']} | {gender_text}\n"
             f"📝 {data['bio']}\n"
-            f"🆔 `{update.effective_user.id}`"
+            f"🆔 `{update.effective_user.id}`\n"
+            f"📱 טלגרם: {tg_username} | {tg_name}"
             + returning_flag
         )
 
