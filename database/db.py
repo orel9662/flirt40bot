@@ -171,6 +171,22 @@ def init_db():
             PRIMARY KEY (user_id, partner_id)
         )
     """)
+    # Migration - add missing columns to existing DB
+    migrations = [
+        "ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN filter_region TEXT",
+        "ALTER TABLE users ADD COLUMN bonus_likes INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN likes_used_today INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN likes_reset_date TEXT",
+        "ALTER TABLE users ADD COLUMN is_premium INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN premium_until TIMESTAMP",
+    ]
+    for sql in migrations:
+        try:
+            c.execute(sql)
+        except Exception:
+            pass  # Column already exists
+
     conn.commit()
     conn.close()
 
