@@ -34,10 +34,11 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f"📋 ממתינים ({stats['pending']})", callback_data="admin_pending"),
          InlineKeyboardButton(f"👥 כל המשתמשים ({stats['total']})", callback_data="admin_users_0")],
+        [InlineKeyboardButton("🔍 חפש משתמש", callback_data="admin_search"),
+         InlineKeyboardButton("💬 הודעות משתמשים", callback_data="admin_messages")],
         [InlineKeyboardButton(f"🚨 דיווחים ({stats['reports']})", callback_data="admin_reports"),
          InlineKeyboardButton(f"🐛 תקלות ({stats['bugs']})", callback_data="admin_bugs")],
-        [InlineKeyboardButton("💬 הודעות משתמשים", callback_data="admin_messages"),
-         InlineKeyboardButton(f"💰 עניין בפרמיום ({stats.get('premium_interest',0)})", callback_data="admin_premium_interest"),
+        [InlineKeyboardButton(f"💰 עניין בפרמיום ({stats.get('premium_interest',0)})", callback_data="admin_premium_interest"),
          InlineKeyboardButton("⚠️ ערעורים", callback_data="appeal_list_appeals")],
         [InlineKeyboardButton("📢 שלח לכולם", callback_data="broadcast_all"),
          InlineKeyboardButton("💬 שוחח עם משתמש", callback_data="msg_user")],
