@@ -765,3 +765,34 @@ def get_unread_messages_count():
         count = 0
     conn.close()
     return count
+
+
+ADMIN_CHAT_SQL = """
+    CREATE TABLE IF NOT EXISTS admin_chat_session (
+        id INTEGER PRIMARY KEY,
+        target_user_id INTEGER,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+
+
+def set_admin_chat(target_user_id):
+    conn = get_conn()
+    conn.execute(ADMIN_CHAT_SQL)
+    conn.execute("DELETE FROM admin_chat_session")
+    if target_user_id:
+        conn.execute("INSERT INTO admin_chat_session (id, target_user_id) VALUES (1, ?)", (target_user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_admin_chat():
+    conn = get_conn()
+    try:
+        conn.execute(ADMIN_CHAT_SQL)
+        row = conn.execute("SELECT target_user_id FROM admin_chat_session WHERE id=1").fetchone()
+        conn.close()
+        return row["target_user_id"] if row else None
+    except Exception:
+        conn.close()
+        return None
