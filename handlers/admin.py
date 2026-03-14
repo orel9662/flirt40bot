@@ -8,7 +8,9 @@ from database.db import (
     set_premium, revoke_premium, add_bonus_likes, add_bonus_likes_all,
     get_all_approved_users, get_pending_reports, resolve_report,
     get_open_bug_reports, get_user_photos, get_all_users_detailed,
-    get_premium_interested_users, soft_delete_user, set_premium_all, search_users, RULES_TEXT, REGIONS
+    get_premium_interested_users, soft_delete_user, set_premium_all, search_users,
+    get_user_messages, mark_messages_read, close_user_conversation, get_unread_messages_count,
+    RULES_TEXT, REGIONS
 )
 import os
 
@@ -34,7 +36,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton(f"👥 כל המשתמשים ({stats['total']})", callback_data="admin_users_0")],
         [InlineKeyboardButton(f"🚨 דיווחים ({stats['reports']})", callback_data="admin_reports"),
          InlineKeyboardButton(f"🐛 תקלות ({stats['bugs']})", callback_data="admin_bugs")],
-        [InlineKeyboardButton(f"💰 עניין בפרמיום ({stats.get('premium_interest',0)})", callback_data="admin_premium_interest"),
+        [InlineKeyboardButton("💬 הודעות משתמשים", callback_data="admin_messages"),
+         InlineKeyboardButton(f"💰 עניין בפרמיום ({stats.get('premium_interest',0)})", callback_data="admin_premium_interest"),
          InlineKeyboardButton("⚠️ ערעורים", callback_data="appeal_list_appeals")],
         [InlineKeyboardButton("📢 שלח לכולם", callback_data="broadcast_all"),
          InlineKeyboardButton("💬 שוחח עם משתמש", callback_data="msg_user")],
@@ -112,6 +115,62 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
 
     if data == "noop":
+        return
+
+    # ── Messages ──
+    if data == "admin_messages":
+        msgs = get_user_messages()
+        if not msgs:
+            await context.bot.send_message(chat_id=ADMIN_ID, text="📭 אין הודעות מהמשתמשים.")
+            return
+        unread = [m for m in msgs if not m["is_read"]]
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💬 *הודעות מהמשתמשים*\n\n{len(msgs)} הודעות | {len(unread)} לא נקראו",
+            parse_mode="Markdown"
+        )
+        for m in msgs[:10]:
+            ge = "👩" if m.get("gender") == "female" else "👨"
+            name = m.get("name") or m["from_user_id"]
+            kb = [[
+                InlineKeyboardButton("👁 פרופיל", callback_data=f"admin_view_user_{m['from_user_id']}"),
+                InlineKeyboardButton("💬 ענה", callback_data=f"msg_to_{m['from_user_id']}"),
+                InlineKeyboardButton("🔚 סגור שיחה", callback_data=f"msg_close_{m['from_user_id']}")
+            ]]
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"{ge} *{name}* | 🆔 `{m['from_user_id']}`\n\n{m['message_text']}\n\n_{str(m['created_at'])[:16]}_",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+            mark_messages_read(m["from_user_id"])
+        return
+
+    if data.startswith("admin_view_user_"):
+        uid = int(data.replace("admin_view_user_", ""))
+        user = get_user(uid)
+        if not user:
+            await context.bot.send_message(chat_id=ADMIN_ID, text="❌ משתמש לא נמצא")
+            return
+        text = _user_card_text(user, 0, 0, 0)
+        kb = _user_keyboard(uid, user)
+        photos = get_user_photos(uid)
+        if photos:
+            await context.bot.send_photo(chat_id=ADMIN_ID, photo=photos[0],
+                caption=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        else:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=text,
+                parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("msg_close_"):
+        uid = int(data.replace("msg_close_", ""))
+        close_user_conversation(uid)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await context.bot.send_message(chat_id=ADMIN_ID, text="✅ השיחה נסגרה.")
         return
 
     # ── Search ──
