@@ -1,11 +1,68 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from database.db import add_user, get_user, get_deleted_user_history, REGIONS, RULES_TEXT
+from database.db import add_user, get_user, get_deleted_user_history, get_user_settings, REGIONS, RULES_TEXT
 import os
 
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 GENDER, NAME, AGE, REGION, CITY, BIO, PHOTOS, ID_CARD = range(8)
 MAX_PHOTOS = 5
+
+TEXTS = {
+    "he": {
+        "welcome_back": "ברוך הבא חזרה",
+        "browse": "💋 גלוש בפרופילים",
+        "status": "👤 הפרופיל שלי",
+        "premium": "⭐ פרמיום",
+        "settings": "⚙️ הגדרות",
+        "report": "🚨 דיווח",
+        "bug": "🐛 תקלה",
+        "delete": "🗑 מחק חשבון",
+        "menu_title": "תפריט ראשי",
+    },
+    "en": {
+        "welcome_back": "Welcome back",
+        "browse": "💋 Browse profiles",
+        "status": "👤 My profile",
+        "premium": "⭐ Premium",
+        "settings": "⚙️ Settings",
+        "report": "🚨 Report",
+        "bug": "🐛 Bug",
+        "delete": "🗑 Delete account",
+        "menu_title": "Main Menu",
+    }
+}
+
+
+def get_lang(user_id):
+    s = get_user_settings(user_id)
+    return s.get("language", "he")
+
+
+def t(user_id, key):
+    lang = get_lang(user_id)
+    return TEXTS.get(lang, TEXTS["he"]).get(key, TEXTS["he"].get(key, key))
+
+
+async def send_main_menu(context, chat_id):
+    lang = get_lang(chat_id)
+    tx = TEXTS.get(lang, TEXTS["he"])
+    keyboard = [
+        [InlineKeyboardButton(tx["browse"], callback_data="menu_browse")],
+        [InlineKeyboardButton(tx["status"], callback_data="menu_status"),
+         InlineKeyboardButton(tx["premium"], callback_data="menu_premium")],
+        [InlineKeyboardButton(tx["settings"], callback_data="menu_settings"),
+         InlineKeyboardButton(tx["report"], callback_data="menu_report")],
+        [InlineKeyboardButton(tx["bug"], callback_data="menu_bug"),
+         InlineKeyboardButton(tx["delete"], callback_data="menu_delete")]
+    ]
+    title = "💋 *Flirt40*" if lang == "he" else "💋 *Flirt40*"
+    subtitle = "בחר/י פעולה:" if lang == "he" else "Choose an action:"
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"{title} | *{tx['menu_title']}*\n\n{subtitle}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16,17 +73,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if existing["is_blocked"]:
             await update.message.reply_text(
                 "⛔ *חשבונך חסום | Your account is blocked*\n\n"
-                "אם אתה חושב שזו טעות, שלח הודעה עם הסברך.\n"
-                "_If you think this is a mistake, send a message explaining._",
+                "שלח הודעה אם חושב שזו טעות.\n_Send a message if you think this is a mistake._",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
 
-        if existing["is_suspended"]:
+        if existing.get("is_suspended"):
             await update.message.reply_text(
-                "⏸ *חשבונך מושעה | Your account is suspended*\n\n"
-                "🇮🇱 חשבונך הושעה עקב דיווח. ההנהלה תיצור איתך קשר בקרוב.\n"
-                "🇬🇧 Your account was suspended due to a report. Admin will contact you soon.",
+                "⏸ *חשבונך מושעה | Suspended*\n\n"
+                "עקב דיווח. ההנהלה תיצור קשר.\n_Due to a report. Admin will contact you._",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
@@ -34,26 +89,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if existing["status"] == "pending":
             await update.message.reply_text(
                 "⏳ *פרופילך ממתין לאישור | Pending approval*\n\n"
-                "🇮🇱 ההנהלה תבדוק את פרופילך בהקדם. תקבל הודעה כאן כשיאושר.\n"
-                "🇬🇧 The admin will review your profile shortly. You'll get a message here when approved.\n\n"
-                "🙏 תודה על הסבלנות! | _Thank you for your patience!_",
+                "🇮🇱 תקבל הודעה כאן ברגע שיאושר.\n"
+                "🇬🇧 You'll get a message here once approved.\n\n"
+                "🙏 תודה על הסבלנות!",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
 
         if existing["status"] == "approved":
-            await update.message.reply_text(
-                f"💋 *ברוך הבא חזרה, {existing['name']}!* | _Welcome back!_\n\n"
-                "/browse - גלוש בפרופילים\n"
-                "/status - הסטטוס שלך\n"
-                "/premium - שדרג לפרמיום\n"
-                "/report - דווח על משתמש\n"
-                "/bug - דווח על תקלה\n"
-                "/delete - מחק את החשבון שלך",
-                parse_mode="Markdown"
-            )
+            lang = get_lang(user_id)
+            name = existing["name"]
+            greeting = f"ברוך הבא חזרה, {name}! 💋" if lang == "he" else f"Welcome back, {name}! 💋"
+            await update.message.reply_text(f"*{greeting}*", parse_mode="Markdown")
+            await send_main_menu(context, user_id)
             return ConversationHandler.END
 
+    # New registration
     keyboard = [
         [InlineKeyboardButton("👩 אישה / Woman", callback_data="gender_female")],
         [InlineKeyboardButton("👨 גבר / Man", callback_data="gender_male")]
@@ -86,7 +137,7 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if len(name) < 2 or len(name) > 30:
-        await update.message.reply_text("❌ שם לא תקין | _Invalid name (2-30 chars):_")
+        await update.message.reply_text("❌ שם לא תקין | _Invalid name (2-30 chars)_")
         return NAME
     context.user_data["name"] = name
     await update.message.reply_text(
@@ -100,7 +151,7 @@ async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         age = int(update.message.text.strip())
     except ValueError:
-        await update.message.reply_text("❌ מספר בלבד | _Numbers only:_")
+        await update.message.reply_text("❌ מספר בלבד | _Numbers only_")
         return AGE
 
     gender = context.user_data.get("gender")
@@ -161,7 +212,7 @@ async def get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bio = update.message.text.strip()
     if len(bio) > 300:
-        await update.message.reply_text("❌ עד 300 תווים | _Max 300 chars:_")
+        await update.message.reply_text("❌ עד 300 תווים | _Max 300 chars_")
         return BIO
     context.user_data["bio"] = bio
     context.user_data["photos"] = []
@@ -169,7 +220,7 @@ async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📸 *שלח/י תמונות פרופיל | Send profile photos*\n\n"
         "🇮🇱 שלח/י עד 5 תמונות אחת אחת. כשסיימת שלח /done\n"
         "🇬🇧 Send up to 5 photos one by one. When done send /done\n\n"
-        "_(התמונה הראשונה = תמונה ראשית | First photo = main photo)_",
+        "_(התמונה הראשונה = תמונה ראשית)_",
         parse_mode="Markdown"
     )
     return PHOTOS
@@ -209,10 +260,10 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _ask_for_id(update):
     await update.message.reply_text(
         "🪪 *שלח/י צילום תעודת זהות | Send your ID card*\n\n"
-        "🇮🇱 *למה?* לאימות גיל ושם בלבד - כדי להבטיח קהילה אמינה ובטוחה.\n"
-        "🔒 התז נגיש אך ורק להנהלה ונמחק לאחר השלמת תהליך האימות.\n\n"
-        "🇬🇧 *Why?* Age and name verification only - to keep our community safe.\n"
-        "🔒 Accessible only to admin and deleted after verification is complete.",
+        "🇮🇱 *למה?* לאימות גיל ושם בלבד - כדי להבטיח קהילה בטוחה.\n"
+        "🔒 נגיש אך ורק להנהלה ונמחק לאחר האימות.\n\n"
+        "🇬🇧 *Why?* Age and name verification only.\n"
+        "🔒 Only accessible to admin and deleted after verification.",
         parse_mode="Markdown"
     )
 
@@ -246,10 +297,7 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bonus_msg = ""
     if bonus > 0:
-        bonus_msg = (
-            f"\n\n🎁 *אתה בין 20 הנרשמים הראשונים!*\n"
-            f"קיבלת {bonus} לייקים מתנה לאחר האישור! 🎉"
-        )
+        bonus_msg = f"\n\n🎁 *אתה בין 20 הנרשמים הראשונים! קיבלת {bonus} לייקים מתנה!* 🎉"
 
     await update.message.reply_text(
         "✅ *ההרשמה התקבלה! | Registration received!*\n\n"
@@ -268,8 +316,7 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if returning:
             returning_flag = (
                 f"\n\n⚠️ *משתמש חוזר!*\n"
-                f"דיווחים קודמים: {returning['had_reports']} | "
-                f"חסימות קודמות: {returning['had_blocks']}"
+                f"דיווחים קודמים: {returning['had_reports']} | חסימות: {returning['had_blocks']}"
             )
 
         keyboard = [[
@@ -277,7 +324,7 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("❌ דחה", callback_data=f"reject_{update.effective_user.id}")
         ], [
             InlineKeyboardButton("🚫 חסום", callback_data=f"block_{update.effective_user.id}"),
-            InlineKeyboardButton("🪪 צפה בתז", callback_data=f"view_id_{update.effective_user.id}")
+            InlineKeyboardButton("🪪 תז", callback_data=f"view_id_{update.effective_user.id}")
         ]]
 
         caption = (
