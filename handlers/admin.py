@@ -8,7 +8,7 @@ from database.db import (
     set_premium, revoke_premium, add_bonus_likes, add_bonus_likes_all,
     get_all_approved_users, get_pending_reports, resolve_report,
     get_open_bug_reports, get_user_photos, get_all_users_detailed,
-    get_premium_interested_users, soft_delete_user, set_premium_all, RULES_TEXT, REGIONS
+    get_premium_interested_users, soft_delete_user, set_premium_all, search_users, RULES_TEXT, REGIONS
 )
 import os
 
@@ -17,6 +17,7 @@ WAITING_BROADCAST = {}
 WAITING_GIFT_AMOUNT = {}
 WAITING_REJECT_REASON = {}
 WAITING_MESSAGE_USER = {}
+WAITING_SEARCH = set()
 
 
 def is_admin(user_id):
@@ -109,6 +110,16 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
 
     if data == "noop":
+        return
+
+    # ── Search ──
+    if data == "admin_search":
+        WAITING_SEARCH.add(ADMIN_ID)
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text="🔍 *חיפוש משתמש*\n\nכתוב שם (חלקי או מלא) או ID:",
+            parse_mode="Markdown"
+        )
         return
 
     # ── All users paginated ──
@@ -468,6 +479,32 @@ async def handle_appeal_message(update: Update, context: ContextTypes.DEFAULT_TY
     message_text = update.message.text if update.message and update.message.text else ""
 
     if is_admin(user_id):
+        # Search
+        if user_id in WAITING_SEARCH:
+            WAITING_SEARCH.discard(user_id)
+            results = search_users(message_text.strip())
+            if not results:
+                await update.message.reply_text("❌ לא נמצאו משתמשים.")
+                return
+            await update.message.reply_text(f"🔍 נמצאו {len(results)} משתמשים:")
+            for u in results[:10]:
+                text = _user_card_text(u, u["report_count"], u["likes_given"], u["likes_received"])
+                kb = _user_keyboard(u["user_id"], u)
+                photos = get_user_photos(u["user_id"])
+                try:
+                    if photos:
+                        await context.bot.send_photo(chat_id=ADMIN_ID, photo=photos[0],
+                            caption=text, parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup(kb))
+                    else:
+                        await context.bot.send_message(chat_id=ADMIN_ID, text=text,
+                            parse_mode="Markdown",
+                            reply_markup=InlineKeyboardMarkup(kb))
+                except Exception as e:
+                    await context.bot.send_message(chat_id=ADMIN_ID,
+                        text=f"⚠️ שגיאה: {e}")
+            return
+
         if user_id in WAITING_REJECT_REASON:
             target_id = WAITING_REJECT_REASON.pop(user_id)
             reject_user(target_id)
