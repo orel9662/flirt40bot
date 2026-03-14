@@ -8,18 +8,19 @@ from telegram.ext import (
 )
 from handlers.registration import (
     start, get_gender, get_name, get_age, get_region, get_city,
-    get_bio, get_photos, get_id_card,
+    get_bio, get_photos, get_id_card, send_main_menu,
     GENDER, NAME, AGE, REGION, CITY, BIO, PHOTOS, ID_CARD
 )
 from handlers.matching import (
     show_next_profile, handle_like_dislike, handle_chat_consent,
     handle_like_message_text, handle_region_filter
 )
-from handlers.admin import admin_panel, handle_admin_callback, handle_appeal_message, _send_main_menu
+from handlers.admin import admin_panel, handle_admin_callback, handle_appeal_message
 from handlers.chat import handle_chat_message, handle_chat_callbacks
 from database.db import (
     init_db, get_user, get_likes_status, REGIONS,
-    add_report, add_bug_report, delete_user_self, track_premium_interest
+    add_report, add_bug_report, delete_user_self, track_premium_interest,
+    get_user_settings, update_user_setting
 )
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -39,108 +40,191 @@ async def handle_menu_callbacks(update, context):
     await query.answer()
     user_id = update.effective_user.id
     data = query.data
+    settings = get_user_settings(user_id)
+    lang = settings.get("language", "he")
+
+    if data == "menu_back":
+        await send_main_menu(context, user_id)
+        return
 
     if data == "menu_browse":
         await show_next_profile(update, context)
-
-    elif data == "menu_premium":
-        track_premium_interest(user_id)
-        keyboard = [
-            [InlineKeyboardButton("💰 רכישה | Purchase", callback_data="menu_premium_buy")],
-            [InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]
-        ]
-        await query.message.reply_text(
-            "⭐ *Flirt40 Premium*\n\n"
-            "✅ לייקים ללא הגבלה\n"
-            "✅ הפרופיל מופיע ראשון\n"
-            "✅ שלח הודעה עם כל לייק\n"
-            "✅ בחר אזור / טווח קילומטרים\n"
-            "✅ ראה מי לייקד אותך\n\n"
-            "⏰ תוקף: 30 יום | ~50₪/חודש",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif data == "menu_premium_buy":
-        track_premium_interest(user_id)
-        back_kb2 = [[InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]]
-        await query.message.reply_text(
-            "🚧 *הפיצ'ר בפיתוח | Feature in development*\n\n"
-            "🇮🇱 אנחנו עובדים על מערכת התשלומים ונשמח לראותך כשהיא תהיה מוכנה!\n"
-            "🇬🇧 We're working on the payment system and look forward to seeing you when it's ready!\n\n"
-            "💌 נשלח לך הודעה כשהפרמיום יהיה זמין.\n_We'll message you when Premium is available._",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(back_kb2)
-        )
-
-    elif data == "menu_back":
-        await _send_main_menu(context, user_id)
         return
 
-    elif data == "menu_status":
+    if data == "menu_premium":
+        track_premium_interest(user_id)
+        if lang == "he":
+            text = (
+                "⭐ *Flirt40 Premium*\n\n"
+                "✅ לייקים ללא הגבלה\n"
+                "✅ הפרופיל מופיע ראשון\n"
+                "✅ שלח הודעה עם כל לייק\n"
+                "✅ בחר אזור / טווח קילומטרים\n"
+                "✅ ראה מי לייקד אותך\n\n"
+                "⏰ תוקף: 30 יום | ~50₪/חודש"
+            )
+        else:
+            text = (
+                "⭐ *Flirt40 Premium*\n\n"
+                "✅ Unlimited likes\n"
+                "✅ Profile shown first\n"
+                "✅ Send message with every like\n"
+                "✅ Choose region / distance\n"
+                "✅ See who liked you\n\n"
+                "⏰ Valid: 30 days | ~$15/month"
+            )
+        keyboard = [
+            [InlineKeyboardButton("💰 רכישה | Purchase", callback_data="menu_premium_buy")],
+            [InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]
+        ]
+        await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if data == "menu_premium_buy":
+        track_premium_interest(user_id)
+        msg = (
+            "🚧 *הפיצ'ר בפיתוח!*\n\n"
+            "אנחנו עובדים על מערכת התשלומים.\n"
+            "נשלח לך הודעה כשיהיה מוכן! 💌"
+            if lang == "he" else
+            "🚧 *Feature in development!*\n\n"
+            "We're working on the payment system.\n"
+            "We'll message you when it's ready! 💌"
+        )
+        kb = [[InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]]
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data == "menu_status":
         user = get_user(user_id)
         if not user:
             await query.message.reply_text("❌ לא נמצא חשבון")
             return
         likes = get_likes_status(user_id)
         if likes and likes["type"] == "premium":
-            likes_text = "⭐ פרמיום - ללא הגבלה"
+            likes_text = "⭐ פרמיום - ללא הגבלה" if lang == "he" else "⭐ Premium - unlimited"
         elif likes:
             likes_text = f"❤️ {likes['daily_remaining']} לייקים היום + {likes['bonus_likes']} בונוס"
         else:
             likes_text = "?"
         region_name = REGIONS.get(user["region"], "")
-        back_kb = [[InlineKeyboardButton("🔙 חזרה לתפריט", callback_data="menu_back")]]
+        kb = [[InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]]
         await query.message.reply_text(
             f"👤 *{user['name']}*, גיל {user['age']}\n"
             f"📍 {region_name} - {user['city']}\n"
-            f"🏷 {'⭐ פרמיום' if user['is_premium'] else 'חינמי'}\n"
+            f"🏷 {'⭐ פרמיום' if user['is_premium'] else ('חינמי' if lang == 'he' else 'Free')}\n"
             f"🔢 {likes_text}",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(back_kb)
+            reply_markup=InlineKeyboardMarkup(kb)
         )
+        return
 
-    elif data == "menu_report":
-        await query.message.reply_text(
-            "🚨 *דיווח על משתמש*\n\n"
-            "שלח: `/report [ID של המשתמש]`\n\n"
-            "את ה-ID תוכל/י לבקש ישירות מהמשתמש.",
-            parse_mode="Markdown"
+    if data == "menu_settings":
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data.startswith("settings_lang_"):
+        new_lang = data.replace("settings_lang_", "")
+        update_user_setting(user_id, "language", new_lang)
+        lang = new_lang
+        msg = "✅ השפה שונתה לעברית!" if new_lang == "he" else "✅ Language changed to English!"
+        await query.message.reply_text(msg)
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data.startswith("settings_age_"):
+        val = int(data.replace("settings_age_", ""))
+        update_user_setting(user_id, "show_age", val)
+        msg = ("✅ הגיל שלך יוצג בפרופיל" if val else "✅ הגיל שלך יוסתר מהפרופיל") if lang == "he" else \
+              ("✅ Your age will be shown" if val else "✅ Your age will be hidden")
+        await query.message.reply_text(msg)
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data.startswith("settings_notif_"):
+        val = int(data.replace("settings_notif_", ""))
+        update_user_setting(user_id, "notifications", val)
+        msg = ("✅ התראות הופעלו" if val else "✅ התראות כובו") if lang == "he" else \
+              ("✅ Notifications enabled" if val else "✅ Notifications disabled")
+        await query.message.reply_text(msg)
+        await show_settings_menu(query.message, user_id, lang)
+        return
+
+    if data == "menu_report":
+        msg = (
+            "🚨 *דיווח על משתמש*\n\nשלח: `/report [ID]`\n\nאת ה-ID תוכל/י לבקש מהמשתמש ישירות."
+            if lang == "he" else
+            "🚨 *Report a user*\n\nSend: `/report [ID]`\n\nYou can ask the user for their ID directly."
         )
+        kb = [[InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]]
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        return
 
-    elif data == "menu_bug":
+    if data == "menu_bug":
         WAITING_BUG.add(user_id)
-        await query.message.reply_text(
-            "🐛 *דיווח תקלה | Report a bug*\n\nתאר/י את הבעיה:",
-            parse_mode="Markdown"
-        )
+        msg = "🐛 *דיווח תקלה*\n\nתאר/י את הבעיה:" if lang == "he" else "🐛 *Report a bug*\n\nDescribe the issue:"
+        await query.message.reply_text(msg, parse_mode="Markdown")
+        return
 
-    elif data == "menu_delete":
-        keyboard = [[
-            InlineKeyboardButton("🗑 כן, מחק", callback_data="confirm_delete"),
-            InlineKeyboardButton("❌ ביטול", callback_data="cancel_delete")
-        ]]
-        await query.message.reply_text(
-            "⚠️ *האם אתה בטוח? | Are you sure?*\n\n"
-            "🇮🇱 הפרופיל יימחק. ניתן להירשם מחדש בעתיד.\n"
-            "🇬🇧 Your profile will be deleted. You can register again later.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+    if data == "menu_delete":
+        yes = "🗑 כן, מחק" if lang == "he" else "🗑 Yes, delete"
+        no = "❌ ביטול" if lang == "he" else "❌ Cancel"
+        msg = (
+            "⚠️ *האם אתה בטוח?*\n\nהפרופיל יימחק. ניתן להירשם מחדש בעתיד."
+            if lang == "he" else
+            "⚠️ *Are you sure?*\n\nYour profile will be deleted. You can register again later."
         )
+        keyboard = [[
+            InlineKeyboardButton(yes, callback_data="confirm_delete"),
+            InlineKeyboardButton(no, callback_data="cancel_delete")
+        ]]
+        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+
+async def show_settings_menu(message, user_id, lang):
+    settings = get_user_settings(user_id)
+    show_age = settings.get("show_age", 1)
+    notif = settings.get("notifications", 1)
+
+    if lang == "he":
+        title = "⚙️ *הגדרות*"
+        lang_label = "🌐 שפה: עברית ✅" if lang == "he" else "🌐 שפה: English ✅"
+        age_label = f"👁 הצג גיל: {'כן ✅' if show_age else 'לא ❌'}"
+        notif_label = f"🔔 התראות: {'פועל ✅' if notif else 'כבוי ❌'}"
+    else:
+        title = "⚙️ *Settings*"
+        lang_label = "🌐 Language: English ✅"
+        age_label = f"👁 Show age: {'Yes ✅' if show_age else 'No ❌'}"
+        notif_label = f"🔔 Notifications: {'On ✅' if notif else 'Off ❌'}"
+
+    keyboard = [
+        [InlineKeyboardButton("🇮🇱 עברית" + (" ✅" if lang == "he" else ""), callback_data="settings_lang_he"),
+         InlineKeyboardButton("🇬🇧 English" + (" ✅" if lang == "en" else ""), callback_data="settings_lang_en")],
+        [InlineKeyboardButton(age_label, callback_data=f"settings_age_{0 if show_age else 1}")],
+        [InlineKeyboardButton(notif_label, callback_data=f"settings_notif_{0 if notif else 1}")],
+        [InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]
+    ]
+    await message.reply_text(
+        f"{title}\n\n{lang_label}\n{age_label}\n{notif_label}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def handle_delete_confirm(update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
+    lang = get_user_settings(user_id).get("language", "he")
     if query.data == "confirm_delete":
         delete_user_self(user_id)
-        await query.edit_message_text(
-            "🗑 *החשבון נמחק | Account deleted*\n\n"
-            "תודה שהיית חלק מ-Flirt40! 💋\n"
-            "כדי להצטרף שוב: /start",
-            parse_mode="Markdown"
+        msg = (
+            "🗑 *החשבון נמחק*\n\nתודה שהיית חלק מ-Flirt40! 💋\nכדי להצטרף שוב: /start"
+            if lang == "he" else
+            "🗑 *Account deleted*\n\nThank you for being part of Flirt40! 💋\nTo rejoin: /start"
         )
+        await query.edit_message_text(msg, parse_mode="Markdown")
     else:
         await query.edit_message_text("✅ ביטול | Cancelled")
 
@@ -152,22 +236,15 @@ async def handle_message(update, context):
 
     if update.message.text and user_id in WAITING_REPORT_REASON:
         target_id = WAITING_REPORT_REASON.pop(user_id)
-        reason = update.message.text.strip()
-        WAITING_REPORT_EVIDENCE[user_id] = {"target_id": target_id, "reason": reason}
-        await update.message.reply_text(
-            "📎 שלח/י תמונת הוכחה, או /skip אם אין\n_Send evidence photo or /skip_",
-            parse_mode="Markdown"
-        )
+        WAITING_REPORT_EVIDENCE[user_id] = {"target_id": target_id, "reason": update.message.text.strip()}
+        await update.message.reply_text("📎 שלח/י תמונת הוכחה, או /skip אם אין")
         return
 
     if user_id in WAITING_REPORT_EVIDENCE:
         data = WAITING_REPORT_EVIDENCE.pop(user_id)
         evidence = update.message.photo[-1].file_id if update.message.photo else None
         add_report(user_id, data["target_id"], data["reason"], evidence)
-        await update.message.reply_text(
-            "✅ *הדיווח התקבל!*\nההנהלה תבדוק בהקדם. | _Admin will review shortly._",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("✅ *הדיווח התקבל!* ההנהלה תבדוק בהקדם.", parse_mode="Markdown")
         admin_id = int(os.environ.get("ADMIN_ID", "0"))
         if admin_id:
             from database.db import get_user as gu
@@ -198,10 +275,7 @@ async def handle_message(update, context):
     if update.message.text and user_id in WAITING_BUG:
         WAITING_BUG.discard(user_id)
         add_bug_report(user_id, update.message.text.strip())
-        await update.message.reply_text(
-            "✅ *דיווח התקלה התקבל! תודה!*\n_Bug report received! Thank you!_",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("✅ *תודה! הדיווח התקבל.*", parse_mode="Markdown")
         return
 
     if not update.message.text:
@@ -232,7 +306,7 @@ async def report_command(update, context):
     user_id = update.effective_user.id
     user = get_user(user_id)
     if not user or user["status"] != "approved":
-        await update.message.reply_text("❌ עליך להיות מאושר | _Must be approved_")
+        await update.message.reply_text("❌ עליך להיות מאושר")
         return
     args = context.args
     if not args:
@@ -247,7 +321,7 @@ async def report_command(update, context):
         await update.message.reply_text("❌ לא ניתן לדווח על עצמך")
         return
     WAITING_REPORT_REASON[user_id] = target_id
-    await update.message.reply_text("📝 מה סיבת הדיווח? תאר/י בקצרה:", parse_mode="Markdown")
+    await update.message.reply_text("📝 מה סיבת הדיווח? תאר/י בקצרה:")
 
 
 async def skip_command(update, context):
@@ -255,7 +329,7 @@ async def skip_command(update, context):
     if user_id in WAITING_REPORT_EVIDENCE:
         data = WAITING_REPORT_EVIDENCE.pop(user_id)
         add_report(user_id, data["target_id"], data["reason"], None)
-        await update.message.reply_text("✅ הדיווח התקבל ללא תמונה.")
+        await update.message.reply_text("✅ הדיווח התקבל.")
 
 
 async def bug_command(update, context):
@@ -274,7 +348,7 @@ async def delete_command(update, context):
         InlineKeyboardButton("❌ ביטול", callback_data="cancel_delete")
     ]]
     await update.message.reply_text(
-        "⚠️ *מחיקת חשבון | Delete account*\n\nהפרופיל יימחק. להמשיך?",
+        "⚠️ *מחיקת חשבון*\n\nהפרופיל יימחק. להמשיך?",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -285,7 +359,7 @@ async def menu_command(update, context):
     if not user or user["status"] != "approved":
         await update.message.reply_text("❌ עליך להיות מאושר | /start")
         return
-    await _send_main_menu(context, update.effective_user.id)
+    await send_main_menu(context, update.effective_user.id)
 
 
 def main():
@@ -322,20 +396,14 @@ def main():
     app.add_handler(CommandHandler("bug", bug_command))
     app.add_handler(CommandHandler("delete", delete_command))
 
-    # Menu callbacks
-    app.add_handler(CallbackQueryHandler(handle_menu_callbacks, pattern="^menu_"))
+    app.add_handler(CallbackQueryHandler(handle_menu_callbacks, pattern="^(menu_|settings_)"))
     app.add_handler(CallbackQueryHandler(handle_delete_confirm, pattern="^(confirm|cancel)_delete$"))
-
-    # Matching callbacks
     app.add_handler(CallbackQueryHandler(handle_like_dislike, pattern="^(like|dislike|like_msg)_"))
     app.add_handler(CallbackQueryHandler(handle_chat_consent, pattern="^chat_(consent|decline)_"))
     app.add_handler(CallbackQueryHandler(handle_chat_callbacks, pattern="^(end_chat|share_details)_"))
     app.add_handler(CallbackQueryHandler(handle_region_filter, pattern="^filter_region_"))
-
-    # Admin callbacks
     app.add_handler(CallbackQueryHandler(handle_admin_callback,
         pattern="^(approve|reject|block|unblock|suspend|unsuspend|admin_|delete_id|view_id|appeal_|broadcast|gift|revoke|report_|bug_|msg_|noop)"))
-
     app.add_handler(PreCheckoutQueryHandler(pre_checkout))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
