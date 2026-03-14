@@ -525,6 +525,22 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
 
+    async def error_handler(update, context):
+        import traceback
+        err = traceback.format_exc()
+        logger.error(f"Exception: {context.error}\n{err}")
+        admin_id = int(os.environ.get("ADMIN_ID", "0"))
+        if admin_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"🚨 שגיאה בבוט:\n`{str(context.error)[:500]}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
+    app.add_error_handler(error_handler)
     logger.info("Flirt40 Bot started!")
     app.run_polling(drop_pending_updates=True)
 
