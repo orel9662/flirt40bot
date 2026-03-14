@@ -21,7 +21,8 @@ from handlers.chat import handle_chat_message, handle_chat_callbacks
 from database.db import (
     init_db, get_user, get_likes_status, REGIONS,
     add_report, add_bug_report, delete_user_self, track_premium_interest,
-    get_user_settings, update_user_setting, add_user_message, get_unread_messages_count
+    get_user_settings, update_user_setting, add_user_message, get_unread_messages_count,
+    set_admin_chat, get_admin_chat
 )
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -396,6 +397,39 @@ async def handle_message(update, context):
         return
 
     if not update.message.text:
+        return
+
+    # ── Admin chat mode: if admin is in chat with a user, forward messages ──
+    admin_id = int(os.environ.get("ADMIN_ID", "0"))
+    if user_id == admin_id:
+        # Admin sent a message - forward to user if in chat mode
+        target_uid = get_admin_chat()
+        if target_uid and update.message and update.message.text:
+            try:
+                await context.bot.send_message(
+                    chat_id=target_uid,
+                    text=f"📨 *הודעה מהנהלת Flirt40:*\n\n{update.message.text}",
+                    parse_mode="Markdown"
+                )
+                await update.message.reply_text("✅ נשלח!")
+            except Exception as e:
+                await update.message.reply_text(f"❌ לא ניתן לשלוח: {e}")
+            return
+
+    # ── User sent a message - if admin is in chat with this user, forward to admin ──
+    target_admin = get_admin_chat()
+    if target_admin and target_admin == user_id and update.message and update.message.text:
+        user = get_user(user_id)
+        name = user["name"] if user else user_id
+        admin_id2 = int(os.environ.get("ADMIN_ID", "0"))
+        from telegram import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM
+        kb = [[IKB("🔚 סיים שיחה", callback_data="admin_end_chat")]]
+        await context.bot.send_message(
+            chat_id=admin_id2,
+            text=f"💬 *{name}:*\n\n{update.message.text}",
+            parse_mode="Markdown",
+            reply_markup=IKM(kb)
+        )
         return
 
     # Forward message to admin inbox (if approved user, not in any other flow)
