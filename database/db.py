@@ -693,3 +693,75 @@ def search_users(query):
         ).fetchall()
     conn.close()
     return users
+
+
+CREATE_MESSAGES_SQL = """
+    CREATE TABLE IF NOT EXISTS user_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_user_id INTEGER,
+        message_text TEXT,
+        message_type TEXT DEFAULT 'text',
+        is_read INTEGER DEFAULT 0,
+        admin_closed INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+
+
+def _ensure_messages_table(conn):
+    conn.execute(CREATE_MESSAGES_SQL)
+
+
+def add_user_message(from_user_id, message_text, message_type="text"):
+    conn = get_conn()
+    _ensure_messages_table(conn)
+    conn.execute(
+        "INSERT INTO user_messages (from_user_id, message_text, message_type) VALUES (?, ?, ?)",
+        (from_user_id, message_text, message_type)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_messages(unread_only=False):
+    conn = get_conn()
+    _ensure_messages_table(conn)
+    where = "WHERE m.admin_closed = 0"
+    if unread_only:
+        where += " AND m.is_read = 0"
+    msgs = conn.execute(
+        f"SELECT m.*, u.name, u.age, u.gender FROM user_messages m "
+        f"LEFT JOIN users u ON m.from_user_id = u.user_id "
+        f"{where} ORDER BY m.created_at DESC LIMIT 50"
+    ).fetchall()
+    conn.close()
+    return msgs
+
+
+def mark_messages_read(user_id):
+    conn = get_conn()
+    _ensure_messages_table(conn)
+    conn.execute("UPDATE user_messages SET is_read = 1 WHERE from_user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def close_user_conversation(user_id):
+    conn = get_conn()
+    _ensure_messages_table(conn)
+    conn.execute("UPDATE user_messages SET admin_closed = 1 WHERE from_user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_unread_messages_count():
+    conn = get_conn()
+    try:
+        _ensure_messages_table(conn)
+        count = conn.execute(
+            "SELECT COUNT(*) as c FROM user_messages WHERE is_read = 0 AND admin_closed = 0"
+        ).fetchone()["c"]
+    except Exception:
+        count = 0
+    conn.close()
+    return count
