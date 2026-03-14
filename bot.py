@@ -110,16 +110,34 @@ async def handle_menu_callbacks(update, context):
             likes_text = f"❤️ {likes['daily_remaining']} לייקים היום + {likes['bonus_likes']} בונוס"
         else:
             likes_text = "?"
-        region_name = REGIONS.get(user["region"], "")
-        kb = [[InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]]
-        await query.message.reply_text(
-            f"👤 *{user['name']}*, גיל {user['age']}\n"
-            f"📍 {region_name} - {user['city']}\n"
-            f"🏷 {'⭐ פרמיום' if user['is_premium'] else ('חינמי' if lang == 'he' else 'Free')}\n"
-            f"🔢 {likes_text}",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(kb)
+        region_name = REGIONS.get(user.get("region", ""), "")
+        from database.db import get_user_photos as gup
+        photos = gup(user_id)
+        gender_emoji = "👩" if user["gender"] == "female" else "👨"
+        premium_badge = "⭐ " if user.get("is_premium") else ""
+        profile_text = (
+            f"{gender_emoji} {premium_badge}*{user['name']}*, גיל {user['age']}\n"
+            f"📍 {region_name} - {user.get('city', '')}\n\n"
+            f"📝 {user.get('bio', '')}\n\n"
+            f"🔢 {likes_text}"
         )
+        kb = [[InlineKeyboardButton("🔙 חזרה | Back", callback_data="menu_back")]]
+        if photos:
+            from telegram import InputMediaPhoto
+            if len(photos) == 1:
+                await query.message.reply_photo(
+                    photo=photos[0], caption=profile_text,
+                    parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb)
+                )
+            else:
+                media = [InputMediaPhoto(media=f) for f in photos[:5]]
+                media[0] = InputMediaPhoto(media=photos[0], caption=profile_text, parse_mode="Markdown")
+                await context.bot.send_media_group(chat_id=user_id, media=media)
+                await query.message.reply_text("👆 הפרופיל שלך | _Your profile_",
+                    parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        else:
+            await query.message.reply_text(profile_text, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data == "menu_settings":
