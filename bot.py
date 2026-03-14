@@ -730,12 +730,7 @@ def run_web():
 
 def main():
     init_db()
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .arbitrary_callback_data(False)
-        .build()
-    )
+    app = Application.builder().token(BOT_TOKEN).build()
 
     registration_conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
