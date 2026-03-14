@@ -35,7 +35,9 @@ RULES_TEXT = (
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = lambda cursor, row: {
+        col[0]: row[idx] for idx, col in enumerate(cursor.description)
+    } if cursor.description else row
     return conn
 
 
