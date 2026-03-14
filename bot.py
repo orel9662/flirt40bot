@@ -465,6 +465,24 @@ async def handle_message(update, context):
         )
         if not_in_flow and update.message and update.message.text:
             add_user_message(user_id, update.message.text)
+            # Forward immediately to admin
+            admin_id = int(os.environ.get("ADMIN_ID", "0"))
+            if admin_id:
+                ge = "👩" if user2.get("gender") == "female" else "👨"
+                name = user2.get("name") or user_id
+                kb = [[
+                    InlineKeyboardButton("💬 שוחח איתו", callback_data=f"admin_start_chat_{user_id}"),
+                    InlineKeyboardButton("👁 פרופיל", callback_data=f"admin_view_user_{user_id}")
+                ]]
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"💬 *הודעה מ{ge} {name}:*\n\n{update.message.text}\n\n🆔 `{user_id}`",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup(kb)
+                    )
+                except Exception:
+                    pass
 
 
 async def handle_photo_message(update, context):
