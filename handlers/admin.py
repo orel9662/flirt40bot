@@ -8,7 +8,7 @@ from database.db import (
     set_premium, revoke_premium, add_bonus_likes, add_bonus_likes_all,
     get_all_approved_users, get_pending_reports, resolve_report,
     get_open_bug_reports, get_user_photos, get_all_users_detailed,
-    get_premium_interested_users, soft_delete_user, RULES_TEXT, REGIONS
+    get_premium_interested_users, soft_delete_user, set_premium_all, RULES_TEXT, REGIONS
 )
 import os
 
@@ -39,8 +39,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("💬 שוחח עם משתמש", callback_data="msg_user")],
         [InlineKeyboardButton("🎁 לייקים לכולם", callback_data="gift_likes_all"),
          InlineKeyboardButton("🎁 לייקים למשתמש", callback_data="gift_likes_user")],
-        [InlineKeyboardButton("⭐ תן פרמיום", callback_data="gift_premium_user"),
-         InlineKeyboardButton("❌ הסר פרמיום", callback_data="revoke_premium_user")],
+        [InlineKeyboardButton("⭐ פרמיום לכולם", callback_data="gift_premium_all"),
+         InlineKeyboardButton("⭐ תן פרמיום", callback_data="gift_premium_user")],
+        [InlineKeyboardButton("❌ הסר פרמיום", callback_data="revoke_premium_user")],
         [InlineKeyboardButton("📊 סטטיסטיקות", callback_data="appeal_stats")]
     ]
     await update.message.reply_text(
@@ -133,8 +134,11 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                     await context.bot.send_message(chat_id=ADMIN_ID, text=text,
                                                    parse_mode="Markdown",
                                                    reply_markup=InlineKeyboardMarkup(kb))
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Error sending user card: {e}")
+                await context.bot.send_message(chat_id=ADMIN_ID,
+                    text=f"⚠️ שגיאה בטעינת כרטיס משתמש {u['user_id']}: {e}")
         nav = []
         if page > 0: nav.append(InlineKeyboardButton("◀️", callback_data=f"admin_users_{page-1}"))
         nav.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
@@ -429,6 +433,11 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         WAITING_GIFT_AMOUNT[ADMIN_ID] = "ask_user_likes"
         await context.bot.send_message(chat_id=ADMIN_ID, text="✍️ ID של המשתמש:")
         return
+    if data == "gift_premium_all":
+        WAITING_GIFT_AMOUNT[ADMIN_ID] = "ask_premium_all_days"
+        await context.bot.send_message(chat_id=ADMIN_ID, text="⭐ כמה ימים פרמיום לכולם? (ברירת מחדל: 30)")
+        return
+
     if data == "gift_premium_user":
         WAITING_GIFT_AMOUNT[ADMIN_ID] = "ask_user_premium"
         await context.bot.send_message(chat_id=ADMIN_ID, text="✍️ ID של המשתמש:")
@@ -534,6 +543,26 @@ async def handle_appeal_message(update: Update, context: ContextTypes.DEFAULT_TY
                 except Exception as e:
                     await update.message.reply_text(f"❌ שגיאה: {e}")
                 return
+            elif state == "ask_premium_all_days":
+                WAITING_GIFT_AMOUNT.pop(user_id)
+                try:
+                    days = int(message_text.strip()) if message_text.strip().isdigit() else 30
+                    affected, until = set_premium_all(days)
+                    users = get_all_approved_users()
+                    for u in users:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=u["user_id"],
+                                text=f"⭐ *מתנה מהנהלת Flirt40!*\n\nקיבלת פרמיום חינם ל-{days} ימים! 🎉\n\n✅ לייקים ללא הגבלה\n✅ הפרופיל מופיע ראשון\n\n⏰ עד: {until.strftime('%d/%m/%Y')}",
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
+                    await update.message.reply_text(f"✅ פרמיום ל-{days} ימים ניתן ל-{affected} משתמשים!")
+                except Exception as e:
+                    await update.message.reply_text(f"❌ שגיאה: {e}")
+                return
+
             elif state == "ask_user_premium":
                 WAITING_GIFT_AMOUNT[user_id] = f"user_premium_{message_text.strip()}"
                 await update.message.reply_text("✍️ כמה ימים? (ברירת מחדל: 30)")
