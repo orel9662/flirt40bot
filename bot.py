@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from functools import wraps
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -18,6 +19,13 @@ from handlers.matching import (
 )
 from handlers.admin import admin_panel, handle_admin_callback, handle_appeal_message
 from handlers.chat import handle_chat_message, handle_chat_callbacks
+try:
+    from flask import Flask as _Flask, request as _request, session as _session, redirect as _redirect
+    from functools import wraps as _wraps
+    FLASK_OK = True
+except Exception:
+    FLASK_OK = False
+
 from database.db import (
     init_db, get_user, get_likes_status, REGIONS,
     add_report, add_bug_report, delete_user_self, track_premium_interest,
@@ -577,6 +585,288 @@ async def menu_command(update, context):
 
 
 
+def _run_web_admin():
+    """Run web admin in background - safe, won't affect bot if it fails."""
+    try:
+        import os as _os
+        db_path = _os.environ.get("DB_PATH", "dating_bot.db")
+        admin_pass = _os.environ.get("ADMIN_WEB_PASSWORD", "admin123")
+        secret = _os.environ.get("WEB_SECRET_KEY", "flirt40secret")
+        port = int(_os.environ.get("PORT", _os.environ.get("WEB_PORT", "5000")))
+
+        if not FLASK_OK:
+            return
+
+        web = _Flask(__name__)
+        web.secret_key = secret
+
+        REGIONS = {"north": "צפון 🌿", "center": "מרכז 🏙", "south": "דרום 🌵"}
+
+        def _conn():
+            import sqlite3
+            c = sqlite3.connect(db_path)
+            c.row_factory = lambda cur, row: {col[0]: row[i] for i, col in enumerate(cur.description)} if cur.description else row
+            return c
+
+        def lr(f):
+            @_wraps(f)
+            def d(*a, **k):
+                if not _session.get("ok"):
+                    return _redirect("/login")
+                return f(*a, **k)
+            return d
+
+        BASE = """<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#080810;color:#fff;font-family:'Heebo',sans-serif;min-height:100vh}
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:300px;background:radial-gradient(ellipse at 50% 0%,rgba(233,30,140,0.12) 0%,transparent 70%);pointer-events:none;z-index:0}
+nav{background:rgba(255,255,255,0.02);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.06);position:sticky;top:0;z-index:100}
+.ni{max-width:1400px;margin:0 auto;padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:64px}
+.nl{font-size:1.3rem;font-weight:900;text-decoration:none;color:#fff}
+.na{display:flex;gap:4px}
+.na a{color:rgba(255,255,255,0.5);text-decoration:none;padding:8px 14px;border-radius:8px;font-size:.85rem;transition:all .2s}
+.na a:hover,.na a.active{background:rgba(233,30,140,0.15);color:#fff}
+.container{max-width:1400px;margin:0 auto;padding:40px 32px;position:relative;z-index:1}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:40px}
+.stat{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:24px;text-align:center}
+.num{font-size:2.8rem;font-weight:900;line-height:1}
+.lbl{color:rgba(255,255,255,0.4);font-size:.8rem;margin-top:6px}
+.pink{color:#e91e8c}.green{color:#4caf50}.orange{color:#ff9800}.red{color:#f44336}.purple{color:#9c27b0}.blue{color:#2196f3}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:16px;overflow:hidden;transition:all .2s}
+.card:hover{border-color:rgba(233,30,140,0.3)}
+.av{height:160px;background:linear-gradient(135deg,rgba(233,30,140,0.2),rgba(100,0,200,0.2));display:flex;align-items:center;justify-content:center;font-size:4rem}
+.cb{padding:16px}
+.cn{font-size:1.05rem;font-weight:700;margin-bottom:4px}
+.cm{color:rgba(255,255,255,0.4);font-size:.8rem;margin-bottom:3px}
+.bio{color:rgba(255,255,255,0.6);font-size:.82rem;margin-top:8px;line-height:1.5}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600;margin:2px}
+.bg{background:rgba(76,175,80,0.15);color:#4caf50;border:1px solid rgba(76,175,80,0.3)}
+.bo{background:rgba(255,152,0,0.15);color:#ff9800;border:1px solid rgba(255,152,0,0.3)}
+.br{background:rgba(244,67,54,0.15);color:#f44336;border:1px solid rgba(244,67,54,0.3)}
+.bp{background:rgba(233,30,140,0.15);color:#e91e8c;border:1px solid rgba(233,30,140,0.3)}
+code{background:rgba(255,255,255,0.07);padding:2px 8px;border-radius:6px;font-size:.78rem;font-family:monospace}
+.fi{display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;align-items:center}
+.fi input{padding:10px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#fff;font-family:inherit;font-size:.9rem;outline:none;width:240px}
+.fi input:focus{border-color:#e91e8c}
+.fa{padding:9px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:rgba(255,255,255,0.5);text-decoration:none;font-size:.82rem;transition:all .2s}
+.fa:hover,.fa.active{background:rgba(233,30,140,0.15);border-color:rgba(233,30,140,0.3);color:#fff}
+.fb{padding:9px 16px;background:linear-gradient(135deg,#e91e8c,#9c27b0);border:none;border-radius:10px;color:#fff;cursor:pointer;font-family:inherit;font-size:.82rem}
+table{width:100%;border-collapse:collapse}
+th{padding:12px 16px;text-align:right;color:rgba(255,255,255,0.3);font-size:.8rem;border-bottom:1px solid rgba(255,255,255,0.06)}
+td{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:.85rem}
+.mc{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:18px;margin-bottom:12px}
+.mh{display:flex;justify-content:space-between;margin-bottom:8px}
+.mt{color:rgba(255,255,255,0.7);line-height:1.6}
+.pag{margin-top:28px;display:flex;gap:6px;justify-content:center}
+.pag a{padding:8px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:rgba(255,255,255,0.5);text-decoration:none;font-size:.85rem}
+.pag a.cur{background:rgba(233,30,140,0.2);border-color:#e91e8c;color:#fff}
+</style></head><body>"""
+
+        def nav(p):
+            ps = {"home":"","users":"","pending":"","reports":"","messages":""}
+            ps[p] = "active"
+            return f"""{BASE}<nav><div class="ni">
+<a href="/" class="nl">💋 Flirt40 Admin</a>
+<div class="na">
+<a href="/" class="{ps["home"]}">🏠 ראשי</a>
+<a href="/users" class="{ps["users"]}">👥 משתמשים</a>
+<a href="/pending" class="{ps["pending"]}">⏳ ממתינים</a>
+<a href="/reports" class="{ps["reports"]}">🚨 דיווחים</a>
+<a href="/messages" class="{ps["messages"]}">💬 הודעות</a>
+<a href="/logout" style="color:rgba(255,100,100,0.5)">יציאה</a>
+</div></div></nav><div class="container">"""
+
+        @web.route("/login", methods=["GET","POST"])
+        def wlogin():
+            err = ""
+            if _request.method == "POST":
+                if _request.form.get("password") == admin_pass:
+                    _session["ok"] = True
+                    return _redirect("/")
+                err = "סיסמה שגויה"
+            return f"""{BASE}<div style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(233,30,140,0.2);border-radius:24px;padding:56px 48px;width:380px;text-align:center">
+<div style="font-size:3rem;margin-bottom:8px">💋</div>
+<h1 style="font-size:2rem;font-weight:900;margin-bottom:4px">Flirt40</h1>
+<p style="color:rgba(255,255,255,0.4);margin-bottom:36px">פאנל ניהול</p>
+<form method="POST">
+<input type="password" name="password" placeholder="סיסמה" autofocus style="width:100%;padding:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:#fff;font-size:1rem;margin-bottom:14px;outline:none;text-align:center;font-family:inherit">
+<button style="width:100%;padding:14px;background:linear-gradient(135deg,#e91e8c,#9c27b0);border:none;border-radius:12px;color:#fff;font-size:1rem;font-weight:700;cursor:pointer;font-family:inherit">כניסה</button>
+</form>
+{f'<p style="color:#f66;font-size:.85rem;margin-top:12px">{err}</p>' if err else ''}
+</div></div></body></html>"""
+
+        @web.route("/logout")
+        def wlogout():
+            _session.clear()
+            return _redirect("/login")
+
+        @web.route("/")
+        @lr
+        def whome():
+            c = _conn()
+            try:
+                total = c.execute("SELECT COUNT(*) as n FROM users").fetchone()["n"]
+                pending = c.execute("SELECT COUNT(*) as n FROM users WHERE status='pending'").fetchone()["n"]
+                approved = c.execute("SELECT COUNT(*) as n FROM users WHERE status='approved'").fetchone()["n"]
+                blocked = c.execute("SELECT COUNT(*) as n FROM users WHERE is_blocked=1").fetchone()["n"]
+                matches = c.execute("SELECT COUNT(*) as n FROM matches").fetchone()["n"]
+                try: reports = c.execute("SELECT COUNT(*) as n FROM reports WHERE status='pending'").fetchone()["n"]
+                except: reports = 0
+                try: msgs = c.execute("SELECT COUNT(*) as n FROM user_messages WHERE is_read=0").fetchone()["n"]
+                except: msgs = 0
+            except Exception as e:
+                c.close()
+                return f"שגיאה: {e}"
+            c.close()
+            return nav("home") + f"""
+<div class="stats">
+<div class="stat"><div class="num pink">{total}</div><div class="lbl">סה"כ משתמשים</div></div>
+<div class="stat"><div class="num orange">{pending}</div><div class="lbl">ממתינים</div></div>
+<div class="stat"><div class="num green">{approved}</div><div class="lbl">מאושרים</div></div>
+<div class="stat"><div class="num red">{blocked}</div><div class="lbl">חסומים</div></div>
+<div class="stat"><div class="num purple">{matches}</div><div class="lbl">התאמות</div></div>
+<div class="stat"><div class="num blue">{reports}</div><div class="lbl">דיווחים</div></div>
+<div class="stat"><div class="num pink">{msgs}</div><div class="lbl">הודעות חדשות</div></div>
+</div>
+<p style="font-size:1.3rem;font-weight:700;margin-bottom:20px">קישורים מהירים</p>
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<a href="/pending" class="fa active">⏳ ממתינים ({pending})</a>
+<a href="/users" class="fa">👥 כל המשתמשים</a>
+<a href="/reports" class="fa">🚨 דיווחים ({reports})</a>
+<a href="/messages" class="fa">💬 הודעות ({msgs})</a>
+</div></div></body></html>"""
+
+        @web.route("/users")
+        @lr
+        def wusers():
+            sf = _request.args.get("status","")
+            s = _request.args.get("search","")
+            pg = int(_request.args.get("page",1))
+            pp = 12
+            c = _conn()
+            w, p = "WHERE 1=1", []
+            if sf: w += " AND status=?"; p.append(sf)
+            if s:
+                try: uid=int(s); w += " AND user_id=?"; p.append(uid)
+                except: w += " AND LOWER(name) LIKE LOWER(?)"; p.append(f"%{s}%")
+            total = c.execute(f"SELECT COUNT(*) as n FROM users {w}", p).fetchone()["n"]
+            ul = c.execute(f"SELECT * FROM users {w} ORDER BY created_at DESC LIMIT ? OFFSET ?", p+[pp,(pg-1)*pp]).fetchall()
+            c.close()
+            cards = ""
+            for u in ul:
+                ge = "👩" if u["gender"]=="female" else "👨"
+                reg = REGIONS.get(u.get("region",""),"")
+                un = f"@{u['username']}" if u.get("username") else "אין"
+                sb = {"approved":'<span class="badge bg">✅ מאושר</span>',
+                      "pending":'<span class="badge bo">⏳ ממתין</span>',
+                      "rejected":'<span class="badge br">❌ נדחה</span>'}.get(u["status"],"")
+                fl = ""
+                if u.get("is_blocked"): fl += '<span class="badge br">🚫</span>'
+                if u.get("is_premium"): fl += '<span class="badge bp">⭐</span>'
+                bio = (u.get("bio") or "")[:70]
+                cards += f'''<div class="card"><div class="av">{ge}</div><div class="cb">
+<div class="cn">{ge} {u["name"]}, {u["age"]}</div>
+<div class="cm">📍 {reg} {u.get("city","")}</div>
+<div class="cm">📱 {un} | <code>{u["user_id"]}</code></div>
+<div style="margin-top:8px">{sb}{fl}</div>
+<div class="bio">{bio}{"..." if len(u.get("bio") or "") > 70 else ""}</div>
+</div></div>'''
+            tp = max(1,(total+pp-1)//pp)
+            pag = "".join([f'<a href="?page={i}&status={sf}&search={s}" class="{"cur" if i==pg else ""}">{i}</a>' for i in range(1,min(tp+1,11))])
+            return nav("users") + f"""
+<form method="GET" class="fi">
+<input type="text" name="search" placeholder="🔍 שם או מזהה..." value="{s}">
+<a href="/users" class="fa {"active" if not sf else ""}">הכל</a>
+<a href="/users?status=approved" class="fa {"active" if sf=="approved" else ""}">✅ מאושרים</a>
+<a href="/users?status=pending" class="fa {"active" if sf=="pending" else ""}">⏳ ממתינים</a>
+<button type="submit" class="fb">חפש</button>
+</form>
+<p style="color:rgba(255,255,255,0.3);font-size:.85rem;margin-bottom:16px">נמצאו {total} משתמשים</p>
+<div class="grid">{cards or '<p style="color:rgba(255,255,255,0.3)">אין משתמשים</p>'}</div>
+<div class="pag">{pag}</div></div></body></html>"""
+
+        @web.route("/pending")
+        @lr
+        def wpending():
+            c = _conn()
+            ul = c.execute("SELECT * FROM users WHERE status='pending' ORDER BY created_at DESC").fetchall()
+            c.close()
+            cards = ""
+            for u in ul:
+                ge = "👩" if u["gender"]=="female" else "👨"
+                reg = REGIONS.get(u.get("region",""),"")
+                un = f"@{u['username']}" if u.get("username") else "אין"
+                cards += f'''<div class="card"><div class="av">{ge}</div><div class="cb">
+<div class="cn">{ge} {u["name"]}, {u["age"]}</div>
+<div class="cm">📍 {reg} {u.get("city","")}</div>
+<div class="cm">📱 {un} | <code>{u["user_id"]}</code></div>
+<span class="badge bo">⏳ ממתין</span>
+<div class="bio">{(u.get("bio") or "")[:70]}</div>
+<div style="margin-top:10px;color:rgba(255,255,255,0.3);font-size:.75rem">לאישור/דחייה - השתמש בטלגרם</div>
+</div></div>'''
+            return nav("pending") + f"""
+<p style="font-size:1.3rem;font-weight:700;margin-bottom:20px">⏳ ממתינים ({len(ul)})</p>
+<div class="grid">{cards or '<p style="color:rgba(255,255,255,0.3)">אין ממתינים</p>'}</div>
+</div></body></html>"""
+
+        @web.route("/reports")
+        @lr
+        def wreports():
+            c = _conn()
+            try:
+                reps = c.execute("""SELECT r.*,u1.name as rn,u2.name as dn,u2.age as da
+                    FROM reports r LEFT JOIN users u1 ON r.reporter_id=u1.user_id
+                    LEFT JOIN users u2 ON r.reported_id=u2.user_id
+                    WHERE r.status='pending' ORDER BY r.created_at DESC""").fetchall()
+            except: reps = []
+            c.close()
+            rows = "".join([f'''<tr><td>{r.get("rn","?")}</td>
+<td>{r.get("dn","?")}, {r.get("da","?")} <code>{r["reported_id"]}</code></td>
+<td>{r.get("reason","")}</td>
+<td style="color:rgba(255,255,255,0.3)">{str(r.get("created_at",""))[:10]}</td></tr>''' for r in reps])
+            return nav("reports") + f"""
+<p style="font-size:1.3rem;font-weight:700;margin-bottom:20px">🚨 דיווחים ({len(reps)})</p>
+{"<table><tr><th>מדווח</th><th>מדוּוח</th><th>סיבה</th><th>תאריך</th></tr>"+rows+"</table>" if reps else '<p style="color:rgba(255,255,255,0.3)">אין דיווחים</p>'}
+<p style="color:rgba(255,255,255,0.3);font-size:.8rem;margin-top:20px">לטיפול - השתמש בפאנל הטלגרם</p>
+</div></body></html>"""
+
+        @web.route("/messages")
+        @lr
+        def wmessages():
+            c = _conn()
+            try:
+                msgs = c.execute("""SELECT m.*,u.name,u.gender FROM user_messages m
+                    LEFT JOIN users u ON m.from_user_id=u.user_id
+                    WHERE m.admin_closed=0 ORDER BY m.created_at DESC LIMIT 50""").fetchall()
+            except: msgs = []
+            c.close()
+            cards = ""
+            for m in msgs:
+                ge = "👩" if m.get("gender")=="female" else "👨"
+                nm = m.get("name") or m["from_user_id"]
+                unr = not m.get("is_read")
+                cards += f'''<div class="mc" style="{"border-color:rgba(233,30,140,0.4)" if unr else ""}">
+<div class="mh">
+<span style="font-weight:700">{ge} {nm} <code>{m["from_user_id"]}</code> {"<span class='badge bp'>חדש</span>" if unr else ""}</span>
+<span style="color:rgba(255,255,255,0.3);font-size:.8rem">{str(m.get("created_at",""))[:16]}</span>
+</div>
+<div class="mt">{m.get("message_text","")}</div>
+</div>'''
+            return nav("messages") + f"""
+<p style="font-size:1.3rem;font-weight:700;margin-bottom:20px">💬 הודעות ({len(msgs)})</p>
+{cards or '<p style="color:rgba(255,255,255,0.3)">אין הודעות</p>'}
+<p style="color:rgba(255,255,255,0.3);font-size:.8rem;margin-top:20px">למענה - השתמש בפאנל הטלגרם</p>
+</div></body></html>"""
+
+        web.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).error(f"Web admin failed to start: {e}")
+
+
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
@@ -638,7 +928,9 @@ def main():
                 pass
 
     app.add_error_handler(error_handler)
-    # Start web admin in background thread
+    # Start web admin in background thread - safe, won't affect bot
+    web_thread = threading.Thread(target=_run_web_admin, daemon=True)
+    web_thread.start()
     logger.info("Flirt40 Bot + Web Admin started!")
     app.run_polling(drop_pending_updates=True)
 
