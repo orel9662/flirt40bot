@@ -52,8 +52,7 @@ async def send_main_menu(context, chat_id):
          InlineKeyboardButton(tx["premium"], callback_data="menu_premium")],
         [InlineKeyboardButton(tx["settings"], callback_data="menu_settings"),
          InlineKeyboardButton(tx["report"], callback_data="menu_report")],
-        [InlineKeyboardButton(tx["bug"], callback_data="menu_bug"),
-         InlineKeyboardButton(tx["delete"], callback_data="menu_delete")]
+        [InlineKeyboardButton(tx["bug"], callback_data="menu_bug")]
     ]
     title = "💋 *Flirt40*" if lang == "he" else "💋 *Flirt40*"
     subtitle = "בחר/י פעולה:" if lang == "he" else "Choose an action:"
