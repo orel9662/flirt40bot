@@ -3,6 +3,11 @@ import os
 from datetime import datetime, date, timedelta
 
 DB_PATH = os.environ.get("DB_PATH", "dating_bot.db")
+
+# Create directory if it doesn't exist
+_db_dir = os.path.dirname(DB_PATH)
+if _db_dir and not os.path.exists(_db_dir):
+    os.makedirs(_db_dir, exist_ok=True)
 FIRST_USERS_BONUS = 20
 FIRST_USERS_COUNT = 20
 FREE_DAILY_LIKES = 10
