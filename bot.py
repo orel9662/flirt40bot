@@ -698,6 +698,30 @@ td{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:.8
 {f'<p style="color:#f66;font-size:.85rem;margin-top:12px">{err}</p>' if err else ''}
 </div></div></body></html>"""
 
+        @web.route("/photo/<file_id>")
+        def photo_proxy(file_id):
+            try:
+                import urllib.request
+                token = _os.environ.get("BOT_TOKEN", "")
+                # Get file path from Telegram
+                url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+                with urllib.request.urlopen(url) as r:
+                    import json
+                    data = json.loads(r.read())
+                    file_path = data["result"]["file_path"]
+                # Download file
+                file_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                with urllib.request.urlopen(file_url) as r:
+                    img_data = r.read()
+                from flask import Response
+                return Response(img_data, mimetype="image/jpeg")
+            except Exception:
+                # Return empty 1x1 pixel if fails
+                from flask import Response
+                import base64
+                px = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+                return Response(px, mimetype="image/png")
+
         @web.route("/logout")
         def wlogout():
             _session.clear()
@@ -767,7 +791,9 @@ td{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:.8
                 if u.get("is_blocked"): fl += '<span class="badge br">🚫</span>'
                 if u.get("is_premium"): fl += '<span class="badge bp">⭐</span>'
                 bio = (u.get("bio") or "")[:70]
-                cards += f'''<div class="card"><div class="av">{ge}</div><div class="cb">
+                _photos = _conn().execute("SELECT file_id FROM user_photos WHERE user_id=? ORDER BY position LIMIT 1",(u["user_id"],)).fetchone()
+                _img = f'<img src="/photo/{_photos["file_id"]}" style="width:100%;height:100%;object-fit:cover">' if _photos else ge
+                cards += f'''<div class="card"><div class="av" style="{'background:#111' if _photos else ''}">{_img}</div><div class="cb">
 <div class="cn">{ge} {u["name"]}, {u["age"]}</div>
 <div class="cm">📍 {reg} {u.get("city","")}</div>
 <div class="cm">📱 {un} | <code>{u["user_id"]}</code></div>
@@ -799,7 +825,9 @@ td{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:.8
                 ge = "👩" if u["gender"]=="female" else "👨"
                 reg = REGIONS.get(u.get("region",""),"")
                 un = f"@{u['username']}" if u.get("username") else "אין"
-                cards += f'''<div class="card"><div class="av">{ge}</div><div class="cb">
+                _photos = _conn().execute("SELECT file_id FROM user_photos WHERE user_id=? ORDER BY position LIMIT 1",(u["user_id"],)).fetchone()
+                _img = f'<img src="/photo/{_photos["file_id"]}" style="width:100%;height:100%;object-fit:cover">' if _photos else ge
+                cards += f'''<div class="card"><div class="av" style="{'background:#111' if _photos else ''}">{_img}</div><div class="cb">
 <div class="cn">{ge} {u["name"]}, {u["age"]}</div>
 <div class="cm">📍 {reg} {u.get("city","")}</div>
 <div class="cm">📱 {un} | <code>{u["user_id"]}</code></div>
