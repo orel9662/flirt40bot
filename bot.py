@@ -521,7 +521,6 @@ def main():
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True,
-        per_message=False,
     )
 
     app.add_handler(registration_conv)
