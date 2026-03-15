@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from database.db import add_user, get_user, get_deleted_user_history, get_user_settings, REGIONS, RULES_TEXT
+from database.db import add_user, get_user, get_deleted_user_history, get_user_settings, track_registration_start, update_registration_step, remove_incomplete_registration, REGIONS, RULES_TEXT
 import os
 
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -103,6 +103,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_main_menu(context, user_id)
             return ConversationHandler.END
 
+    # Track this as incomplete registration
+    track_registration_start(
+        update.effective_user.id,
+        update.effective_user.username,
+        update.effective_user.full_name
+    )
+
     # New registration
     keyboard = [
         [InlineKeyboardButton("👩 אישה / Woman", callback_data="gender_female")],
@@ -130,6 +137,7 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "מה שמך? | *What's your name?*\n_(שם פרטי בלבד | First name only)_",
         parse_mode="Markdown"
     )
+    update_registration_step(update.effective_user.id, 'name')
     return NAME
 
 
@@ -143,6 +151,7 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"שלום {name}! 👋\n\nמה גילך? | *How old are you?*\n_(מספר בלבד | numbers only)_",
         parse_mode="Markdown"
     )
+    update_registration_step(update.effective_user.id, 'age')
     return AGE
 
 
@@ -181,6 +190,7 @@ async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    update_registration_step(update.effective_user.id, 'region')
     return REGION
 
 
@@ -194,6 +204,7 @@ async def get_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ {region_name}\n\nבאיזו עיר? | *Which city?*",
         parse_mode="Markdown"
     )
+    update_registration_step(update.effective_user.id, 'city')
     return CITY
 
 
@@ -205,6 +216,7 @@ async def get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🇬🇧 What you're looking for, hobbies - max 300 chars",
         parse_mode="Markdown"
     )
+    update_registration_step(update.effective_user.id, 'bio')
     return BIO
 
 
@@ -222,6 +234,7 @@ async def get_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "_(התמונה הראשונה = תמונה ראשית)_",
         parse_mode="Markdown"
     )
+    update_registration_step(update.effective_user.id, 'photos')
     return PHOTOS
 
 
@@ -357,4 +370,5 @@ async def get_id_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import logging
             logging.getLogger(__name__).error(f"Admin notify failed: {e}")
 
+    remove_incomplete_registration(update.effective_user.id)
     return ConversationHandler.END
