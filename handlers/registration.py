@@ -110,6 +110,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_user.full_name
     )
 
+    # Notify admin immediately
+    import os
+    admin_id = int(os.environ.get("ADMIN_ID", "0"))
+    if admin_id:
+        un = f"@{update.effective_user.username}" if update.effective_user.username else "אין שם משתמש"
+        full = update.effective_user.full_name or ""
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"👋 *משתמש חדש התחיל להירשם!*\n\n👤 {full}\n📱 {un}\n🆔 `{update.effective_user.id}`",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
     # New registration
     keyboard = [
         [InlineKeyboardButton("👩 אישה / Woman", callback_data="gender_female")],
