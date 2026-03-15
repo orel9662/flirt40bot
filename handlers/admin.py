@@ -10,7 +10,7 @@ from database.db import (
     get_open_bug_reports, get_user_photos, get_all_users_detailed,
     get_premium_interested_users, soft_delete_user, set_premium_all, search_users,
     get_user_messages, mark_messages_read, close_user_conversation, get_unread_messages_count,
-    set_admin_chat, get_admin_chat,
+    set_admin_chat, get_admin_chat, get_incomplete_registrations,
     RULES_TEXT, REGIONS
 )
 import os
@@ -35,7 +35,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f"📋 ממתינים ({stats['pending']})", callback_data="admin_pending"),
          InlineKeyboardButton(f"👥 כל המשתמשים ({stats['total']})", callback_data="admin_users_0")],
-        [InlineKeyboardButton("🔍 חפש משתמש", callback_data="admin_search"),
+        [InlineKeyboardButton("👀 עזבו באמצע", callback_data="admin_incomplete"),
+         InlineKeyboardButton("🔍 חפש משתמש", callback_data="admin_search"),
          InlineKeyboardButton("💬 הודעות משתמשים", callback_data="admin_messages")],
         [InlineKeyboardButton(f"🚨 דיווחים ({stats['reports']})", callback_data="admin_reports"),
          InlineKeyboardButton(f"🐛 תקלות ({stats['bugs']})", callback_data="admin_bugs")],
@@ -212,6 +213,21 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception:
             pass
         await context.bot.send_message(chat_id=ADMIN_ID, text="✅ השיחה נסגרה.")
+        return
+
+    # ── Incomplete registrations ──
+    if data == "admin_incomplete":
+        incomplete = get_incomplete_registrations()
+        if not incomplete:
+            await context.bot.send_message(chat_id=ADMIN_ID, text="✅ אין משתמשים שעזבו באמצע.")
+            return
+        text = f"👀 *{len(incomplete)} עזבו באמצע ההרשמה:*\n\n"
+        steps_he = {"start":"התחיל","name":"שם","age":"גיל","region":"אזור","city":"עיר","bio":"ביו","photos":"תמונות","id_card":"תעודת זהות"}
+        for r in incomplete[:20]:
+            un = f"@{r['username']}" if r.get("username") else "אין שם משתמש"
+            step = steps_he.get(r.get("last_step",""), r.get("last_step",""))
+            text += f"• {un} | עצר ב: {step} | 🆔 `{r['user_id']}`\n"
+        await context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
         return
 
     # ── Search ──
