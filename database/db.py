@@ -796,3 +796,59 @@ def get_admin_chat():
     except Exception:
         conn.close()
         return None
+
+
+INCOMPLETE_SQL = """
+    CREATE TABLE IF NOT EXISTS incomplete_registrations (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        full_name TEXT,
+        last_step TEXT,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+
+
+def track_registration_start(user_id, username, full_name):
+    conn = get_conn()
+    conn.execute(INCOMPLETE_SQL)
+    conn.execute("""
+        INSERT OR REPLACE INTO incomplete_registrations
+        (user_id, username, full_name, last_step, updated_at)
+        VALUES (?, ?, ?, 'start', CURRENT_TIMESTAMP)
+    """, (user_id, username or "", full_name or ""))
+    conn.commit()
+    conn.close()
+
+
+def update_registration_step(user_id, step):
+    conn = get_conn()
+    conn.execute(INCOMPLETE_SQL)
+    conn.execute("""
+        UPDATE incomplete_registrations
+        SET last_step=?, updated_at=CURRENT_TIMESTAMP
+        WHERE user_id=?
+    """, (step, user_id))
+    conn.commit()
+    conn.close()
+
+
+def remove_incomplete_registration(user_id):
+    conn = get_conn()
+    conn.execute(INCOMPLETE_SQL)
+    conn.execute("DELETE FROM incomplete_registrations WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_incomplete_registrations():
+    conn = get_conn()
+    conn.execute(INCOMPLETE_SQL)
+    rows = conn.execute("""
+        SELECT i.* FROM incomplete_registrations i
+        WHERE i.user_id NOT IN (SELECT user_id FROM users)
+        ORDER BY i.updated_at DESC
+    """).fetchall()
+    conn.close()
+    return rows
